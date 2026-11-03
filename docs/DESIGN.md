@@ -750,6 +750,12 @@ Discover one item per `pf:interfaces/<key>`. Status follows from the IfaceTarget
 * Physical and unmapped → UNSUPPORTED "NIC not mapped".
 * `deps`: `vlan:<device>` for vlan kind, `wgtun:<device>` for wireguard kind.
 
+**Every item this translator emits — OK, PARTIAL *and* UNSUPPORTED — sets
+`readonly_selection=True`.** Interface selection is not edited in the item tree: `iface:<key>` is
+selected iff `ifmap.targets[key].include`, and only the interface-map screen changes that (§8, §15).
+The TUI relies on this flag to refuse `space` and to point the user at the map, so `discover` must
+set it on each item it returns.
+
 Render: REPLACE `opn:interfaces/<key>` with:
 
 | pf | opn | transform |
@@ -1225,7 +1231,14 @@ Groups: `pf:system/group[]` with `scope` != `system` → APPEND `opn:system/grou
 selected (or `0`), `priv` filtered as above. For system groups, `admins` with extra members →
 an item `group:admins` (merge) that only adds selected member uids to the base admins
 `member` list. `all` → ignored.
-`finalize`: SET `system/nextuid` = max(existing, max uid + 1) and the same for `nextgid`.
+
+`gid` follows the **same rule as `uid`** (do not copy it verbatim): the model's
+`Auth/FieldTypes/GidField.php` auto-allocates a GID from 2000 only when the value is empty and
+applies **no uniqueness check**, so a copied `gid` can silently collide with a base group. Keep the
+pfSense `gid` if it isn't already used in the base; otherwise assign `max(base gids, nextgid)` (then
+the next free number above it) and warn `"gid N already used in the base; assigned M"`.
+`finalize`: SET `system/nextuid` = max(existing, max uid + 1) and `system/nextgid` =
+max(existing, max gid + 1).
 
 #### 12.1.16 Cron (`cron.py`, tier 1 classifier, nothing rendered)
 Every `pf:cron/item` → UNSUPPORTED item, label `"<minute> <hour> <mday> <month> <wday> <command[:60]>"`, reason from the first matching rule:
@@ -1241,16 +1254,30 @@ Every `pf:cron/item` → UNSUPPORTED item, label `"<minute> <hour> <mday> <month
 #### 12.1.17 WireGuard (`wireguard.py`)
 Source: `pf:installedpackages/wireguard/{tunnels,peers}/item[]`.
 
-**Tunnels** (`wgtun:<name>`, translator `wg_tunnel`, base_policy `merge` by instance).
-`instance` = the integer N from `tun_wgN` (if N is already used in base → the next free
-number + warning). `ifmap.wg_names[name] = f"wg{instance}"`. Render → APPEND
+**Tunnels** (`wgtun:<name>`, translator `wg_tunnel`, base_policy `merge`, container
+`OPNsense/wireguard/server/servers`, **identity = the output `instance`**).
+
+Output-instance assignment, in document order:
+1. `N` = the integer from `tun_wgN` (the pfSense `name` field is the *device* name); `0` when it
+   doesn't match the pattern. `ifmap.wg_names[name] = f"wg{instance}"` uses the final value.
+2. `used` = the `instance` of every base server **except** one this migration replaces. A base
+   server is "this tunnel" when its `name` equals the tunnel's output friendly name — the same
+   deterministic value a previous pf2opn run wrote. Such a server's `instance` is **reused**, so
+   re-running against pf2opn's own output is a no-op instead of allocating fresh instances each time.
+3. If `N` ∉ `used`, `instance = N`. Otherwise `instance` = the next free number
+   (≥ `max(used ∪ {N}) + 1`), with warning `"instance N already used in the base; assigned M"`.
+   **The colliding base tunnel is kept** — it is a different tunnel and is not touched.
+
+Because the merge identity is the *output* instance and that value is chosen to differ from every
+unrelated base instance, `apply_base_policy` can only remove a base server this run is replacing (a
+prior pf2opn output of the same tunnel); an unrelated base tunnel survives. Render → APPEND
 `opn:OPNsense/wireguard/server/servers/server`:
 
 | opn | value |
 |---|---|
 | `enabled` | `1` if pf `enabled`=`yes` else `0` |
-| `name` | `sanitize_name(descr or name)`, unique (suffix `_2`…). **In pfSense the `name` field holds the *device* name (`tun_wg0`, `tun_wg1`, one per tunnel), so the friendly name must come from `descr`** (ProtonVPN / Smartass Wireguard in the real config). |
-| `instance` | N |
+| `name` | `sanitize_name(descr or name)`, unique **within the migration only** (suffix `_2`…; the running set is never seeded from base names, so a name that also exists in the base is the entry being replaced, not a reason to rename). **In pfSense the `name` field holds the *device* name (`tun_wg0`, `tun_wg1`, one per tunnel), so the friendly name must come from `descr`** (ProtonVPN / Smartass Wireguard in the real config). |
+| `instance` | the final output instance from the assignment above (usually `N`, reassigned on a base collision). This is also the merge identity. |
 | `pubkey` / `privkey` | `publickey` / `privatekey` |
 | `port` | `listenport` |
 | `mtu` | `mtu` |
@@ -1266,13 +1293,24 @@ default route); add static routes for remote subnets: <list of non-tunnel allowe
 networks>". If the tunnel isn't assigned to an interface → note "unassigned tunnel".
 `finalize`: SET `OPNsense/wireguard/general/enabled` = `1`.
 
-**Peers** (`wgpeer:<i>`, translator `wg_peer`). `tun` = `unassigned` or a tunnel not in the
-source → UNSUPPORTED "peer not attached to a tunnel". Deps: `wgtun:<tun>`. Render → APPEND
-`opn:OPNsense/wireguard/client/clients/client` (uuid = `ctx.uuid("wgpeer:<i>")`):
-`enabled` (`yes`→`1`), `name`=`sanitize_name(descr)` (unique), `pubkey`←`publickey`,
-`psk`←`presharedkey`, `keepalive`←`persistentkeepalive`, `privkey` empty (pfSense peers do not
-store the remote private key), `servers` = comma list containing the server uuid when the peer's
-tunnel is migrated.
+**Peers** (`wgpeer:<i>`, translator `wg_peer`, base_policy `merge`, **identity = the peer's
+assigned output `name`**). `tun` = `unassigned` or a tunnel not in the source → UNSUPPORTED "peer
+not attached to a tunnel". Deps: `wgtun:<tun>`. The output `name` is `sanitize_name(descr)` (or
+`peer<index>` when the descr is empty), uniquified **within this migration only**: the running set
+starts empty and is never seeded from base client names. So:
+* two peers **in the same migration** whose `descr` → the same name get `_2`, `_3`… in peer-index
+  order, which is deterministic, so a re-run assigns the same suffixes;
+* a name that also exists in the base is a **merge-replace**, not a rename: the base client with
+  that name is removed by `apply_base_policy` (the identity is that name) and re-added under it.
+
+This is the rule that makes re-runs idempotent. The identity must be the assigned name, and name
+uniqueness must ignore the base; deduping against the base and then using the deduped name as the
+identity can never match the base peer, so the base entry is never replaced and every re-run appends
+another copy. Render → APPEND `opn:OPNsense/wireguard/client/clients/client`
+(uuid = `ctx.uuid("wgpeer:<i>")`): `enabled` (`yes`→`1`), `name` = the assigned name,
+`pubkey`←`publickey`, `psk`←`presharedkey`, `keepalive`←`persistentkeepalive`, `privkey` empty
+(pfSense peers do not store the remote private key), `servers` = comma list containing the server
+uuid when the peer's tunnel is migrated.
 
 `tunneladdress` — **the one genuinely lossy mapping in this translator, so decide it explicitly:**
 
@@ -1328,9 +1366,19 @@ Followup: "install os-ddclient before importing, or the section stays inert unti
 #### 12.1.19 Syslog (`syslog.py`, base_policy `merge`)
 For N in `remoteserver`, `remoteserver2`, `remoteserver3` with text and `pf:syslog/enable`
 present → APPEND `opn:OPNsense/Syslog/destinations/destination`: `enabled=1`, `transport` =
-`udp6` if `ipproto`==`ipv6` else `udp4`, `hostname` = the part before `:`, `port` = the part
-after `:` or `514`, `level` empty, `facility` empty, `program` empty, `rfc5424=0`,
-`description`=`"pf2opn remote syslog"`. pfSense-only toggles (`filterdescriptions`,
+`udp6` if `ipproto`==`ipv6` else `udp4`, `level` empty, `facility` empty, `program` empty,
+`rfc5424=0`, `description`=`"pf2opn remote syslog"`. The value is split into `hostname`/`port` by
+**shape, not on the first `:`** — an IPv6 literal contains colons, so a naive split turns `::1`
+into an empty hostname (`hostname=""`, `port=":1"`):
+* `[v6]` or `[v6]:port` → `hostname` = the text inside the brackets (brackets dropped), `port` =
+  the text after `]:`, else `514`.
+* a bare IPv6 literal (two or more `:`, no brackets: `::1`, `2001:db8::514`) → the **whole value**
+  is `hostname` and `port` = `514`. A port with IPv6 must be written bracketed; a bare literal is
+  never split, because its last group cannot be told apart from a port.
+* otherwise (hostname or IPv4; zero or one `:`) → `hostname` = before the `:` (or the whole value),
+  `port` = after the `:` or `514`.
+`hostname` is OPNsense's `HostnameField` (`IpAllowed` defaults to `true`), so the bare IPv6 literal
+is written unbracketed into the config. pfSense-only toggles (`filterdescriptions`,
 `logall`, per-category flags) → one info item `syslog:local` UNSUPPORTED "local log
 settings differ; review System ▸ Settings ▸ Logging". For the real config this is the only
 syslog item.
@@ -1369,8 +1417,12 @@ leases — but it is **not** used here (D5). If it is ever added, it slots in as
 same `dhcp:<ifkey>` items.
 
 ### 12.4 Unsupported catalogue (`unsupported.py`; each is one item, always UNSUPPORTED)
-Emit an item only if the section/package is present **and non-empty** (an element with
-children or text).
+Emit an item only if the section/package is present **and non-empty**. "Non-empty" means the
+element has non-whitespace text of its own, **or** at least one child element that is itself
+non-empty. A **present-but-empty child does not count**: `<pfblockerng/>`,
+`<snmpd><syslocation/></snmpd>` and `<…><enable/></…>` are *not* non-empty and must not raise an
+item. Detectors must test the *content* of the child, not merely its existence (e.g. `snmpd` with
+`syslocation` text, not an empty `<syslocation/>`; a `pfblockerng` element with children).
 
 | id | detected by | reason / alternative |
 |---|---|---|
@@ -1476,6 +1528,13 @@ sanitizing; `nat/outbound/mode` automatic with snat rules present.
 
 The report never includes XML or field values from SECRET_TAGS (§11).
 
+**File mode (deliberate):** the report is written with the process's normal mode — `0644` under the
+default umask, via `Path.write_text` — and **not** the `0600` used for the output config. This is
+intentional, not an oversight: by construction the Markdown holds only labels, reasons, warnings,
+counts, paths and hashes, so it carries no secrets and a world-readable mode lets a reviewer or a
+diff tool read it without the config's permissions. If a secret value could reach the report, that
+would already be a §11 rule-3 violation, independent of the file mode.
+
 ---
 
 ## 15. TUI (`tui/`)
@@ -1498,8 +1557,13 @@ rows are editable. Keys:
   On success, `build_plan()` runs again (keeping selection by id).
 
 **SelectScreen**: a horizontal split.
-* Left: `ItemTree(Tree)`. The root holds one node per translator `title` (Tier 0/unsupported
-  sections last, under a "Not translatable" node). Children are items.
+* Left: `ItemTree(Tree)`. The root holds one node per translator `title`; children are items.
+  **Only tier-0 translators** (the `unsupported` catalogue, §12.4) are collected into a single
+  trailing "Not translatable" node. A tier-1 or tier-2 translator **always** renders as its own
+  section under its `title`, **even when every one of its items is UNSUPPORTED** — e.g. `cron` (the
+  tier-1 classifier, §12.1.16) keeps a "Cron" section, it does not move under "Not translatable".
+  The grouping key is `translator.tier == 0`; it is **not** "all items in this section are
+  UNSUPPORTED".
   * Item label: `"[x] ✔ label"` / `"[ ] ⚠ label"` / `"    ✖ label"`. Colours: OK green,
     PARTIAL yellow, UNSUPPORTED red/dim.
   * Section label: `"[x]"` all / `"[-]"` some / `"[ ]"` none, plus `title (selected/total)`.
@@ -1514,7 +1578,8 @@ rows are editable. Keys:
   (Input in the footer, Esc clears); `e`/`E` expand/collapse all; `i` back to the interface
   map; `r` review; `?` help modal listing keys.
 * Toggling an UNSUPPORTED item or an interface item shows a notification explaining why it
-  can't be toggled.
+  can't be toggled. Interface items (`iface:*`) carry `readonly_selection=True` (§12.1.2), so
+  `space` on one never changes selection — the user is sent to the interface-map screen (`i`).
 
 **ReviewScreen**: runs `build_output` and `validate` in a worker thread (`@work(thread=True)`).
 It shows the summary table (as in the report), errors (red), and warnings (yellow), plus the
@@ -1848,3 +1913,26 @@ was wrong or incomplete. Re-verified against `26.7.8` for this pass:
   check 9 marked M10; §11 rule 5 now names `cli.main()` as the install point for `RedactingFilter`.
   The `categories`/`overload` and `mode=static` amendments change what M5/M6/M7 must render; golden
   tests will need to move with them.
+
+### 2026-11-03 — spec amendments after the second review
+
+A second review (M10–M14 implementation) found the spec wrong or silent in the places below; each
+is now stated in the referenced section. Re-verified against `26.7.8` for this pass:
+
+* `Wireguard/Server.xml` — `instance` is an `AutoNumberField` and `ServerField.php` derives the
+  device name as `wg{instance}`; the server `name` is a free label. So the tunnel merge identity is
+  the **output instance**, not the pfSense `N`, and an instance collision reassigns while keeping
+  the base tunnel (§12.1.17).
+* `Wireguard/Client.xml` — the client `name` carries **no** `UniqueConstraint` (the only one is on
+  `pubkey`+`serveraddress`+`serverport`), but two clients still must not share a name in our
+  output, so peer identity is our own assigned `name` and a base name collision is a merge-replace,
+  not a `_2` rename (§12.1.17).
+* `Auth/FieldTypes/GidField.php` — auto-allocates a gid from 2000 only when the value is empty and
+  applies no uniqueness check, so a verbatim `gid` can collide with a base group. The gid rule now
+  mirrors the uid rule (§12.1.15).
+* `Base/FieldTypes/HostnameField.php` (the Syslog `hostname` field) — `IpAllowed` defaults to
+  `true`, so a bare IPv6 literal is a valid value; the syslog split is therefore shape-based, not
+  colon-based, and a bare IPv6 address is kept whole (§12.1.19).
+* `pfsense/pfsense` `syslog.inc::system_syslogd_fixup_server()` — confirms pfSense stores an
+  unbracketed IPv6 literal for a remote server (it brackets it only when writing `syslog.conf`),
+  which is why the split must not treat the colons as a host/port separator (§12.1.19).
