@@ -1,0 +1,18 @@
+<golden>
+  <placement path="staticroutes" mode="append">
+    <route uuid="5d06340a-ec78-5f98-bd56-8600118c2738">
+      <network>10.9.0.0/16</network>
+      <gateway>OPT1_GW</gateway>
+      <descr>via OPT1</descr>
+      <enabled>1</enabled>
+    </route>
+  </placement>
+  <placement path="staticroutes" mode="append">
+    <route uuid="ae75f701-8e87-59f3-948b-616681b01917">
+      <network>10.8.0.0/16</network>
+      <gateway>WAN_DHCP</gateway>
+      <descr>disabled route</descr>
+      <enabled>0</enabled>
+    </route>
+  </placement>
+</golden>

@@ -76,6 +76,29 @@ def misc_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def section_placements() -> Callable:
+    """Render the default-selected, migratable items of one section (§16.2)."""
+    from pf2opn.context import WriteContext
+    from pf2opn.model import Status
+    from pf2opn.registry import get
+
+    def collect(src, plan, section: str) -> list:
+        translator = get(section)
+        ctx = WriteContext(src, plan)
+        placements = []
+        for item in plan.items:
+            if (
+                item.section == section
+                and item.id in plan.selected
+                and item.status != Status.UNSUPPORTED
+            ):
+                placements.extend(translator.render(item, ctx))
+        return placements
+
+    return collect
+
+
+@pytest.fixture
 def wrap_placements() -> Callable[[list], str]:
     """Wrap rendered placements as a golden ``<golden>`` document (§16.2)."""
 

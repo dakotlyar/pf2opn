@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>miscbox</hostname>
+		<domain>example.test</domain>
+	</system>
+	<interfaces>
+		<wan>
+			<if>em0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+		</wan>
+		<lan>
+			<if>em1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+		<opt1>
+			<if>em2</if>
+			<descr>OPT1</descr>
+			<enable></enable>
+			<ipaddr>10.0.10.1</ipaddr>
+			<subnet>24</subnet>
+		</opt1>
+	</interfaces>
+	<gateways>
+		<defaultgw4>WAN_DHCP</defaultgw4>
+		<gateway_item>
+			<name>WAN_DHCP</name>
+			<descr>WAN DHCP</descr>
+			<interface>wan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>dynamic</gateway>
+		</gateway_item>
+		<gateway_item>
+			<name>OPT1_GW</name>
+			<descr>OPT1 gateway</descr>
+			<interface>opt1</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>10.0.10.254</gateway>
+			<monitor>10.0.10.254</monitor>
+			<weight>3</weight>
+			<latencylow>100</latencylow>
+			<action_disable></action_disable>
+		</gateway_item>
+		<gateway_item>
+			<name>QSOL_WGGW</name>
+			<descr>missing interface</descr>
+			<interface>opt11</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>10.9.9.1</gateway>
+		</gateway_item>
+		<gateway_item>
+			<name>bad name</name>
+			<descr>invalid name</descr>
+			<interface>wan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>1.2.3.4</gateway>
+		</gateway_item>
+	</gateways>
+	<staticroutes>
+		<route>
+			<network>10.9.0.0/16</network>
+			<gateway>OPT1_GW</gateway>
+			<descr>via OPT1</descr>
+		</route>
+		<route>
+			<network>10.8.0.0/16</network>
+			<gateway>WAN_DHCP</gateway>
+			<descr>disabled route</descr>
+			<disabled></disabled>
+		</route>
+	</staticroutes>
+	<virtualip>
+		<vip>
+			<mode>ipalias</mode>
+			<interface>lo0</interface>
+			<subnet>192.168.2.1</subnet>
+			<subnet_bits>24</subnet_bits>
+			<descr>DNSBL redirect</descr>
+			<uniqid>abc123</uniqid>
+			<type>single</type>
+		</vip>
+		<vip>
+			<mode>carp</mode>
+			<interface>lan</interface>
+			<subnet>192.168.1.2</subnet>
+			<subnet_bits>24</subnet_bits>
+			<descr>CARP VIP</descr>
+			<vhid>10</vhid>
+			<advbase>1</advbase>
+			<advskew>0</advskew>
+			<password>syntheticsecret</password>
+		</vip>
+	</virtualip>
+</pfsense>

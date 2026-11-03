@@ -35,8 +35,8 @@ _KNOWN_TAGS = frozenset(
 )
 
 
-def _is_adv_dhcp(tag: str) -> bool:
-    return tag.startswith("adv_dhcp_") or tag.startswith("adv_dhcp6_")
+def _is_adv_dhcp(tag: object) -> bool:
+    return isinstance(tag, str) and (tag.startswith("adv_dhcp_") or tag.startswith("adv_dhcp6_"))
 
 
 def _unknown_with_text(child: etree._Element) -> bool:

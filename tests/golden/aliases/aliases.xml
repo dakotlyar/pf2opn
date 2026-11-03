@@ -1,0 +1,62 @@
+<golden>
+  <placement path="OPNsense/Firewall/Alias/aliases" mode="append">
+    <alias uuid="503a7e95-d2bf-552d-b0a7-b21af54340c3">
+      <enabled>1</enabled>
+      <name>RFC1918</name>
+      <type>network</type>
+      <content>10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16</content>
+      <description>Private networks</description>
+      <proto/>
+      <counters>0</counters>
+    </alias>
+  </placement>
+  <placement path="OPNsense/Firewall/Alias/aliases" mode="append">
+    <alias uuid="f7d22e83-33f0-54c8-b4cc-620d907a6af0">
+      <enabled>1</enabled>
+      <name>SERVER1</name>
+      <type>host</type>
+      <content>192.168.2.10</content>
+      <description>Server one</description>
+      <proto/>
+      <counters>0</counters>
+    </alias>
+  </placement>
+  <placement path="OPNsense/Firewall/Alias/aliases" mode="append">
+    <alias uuid="fcb29a26-de69-596b-8bc1-9015f033604c">
+      <enabled>1</enabled>
+      <name>WEBPORTS</name>
+      <type>port</type>
+      <content>80
+443</content>
+      <description>Web ports</description>
+      <proto/>
+      <counters>0</counters>
+    </alias>
+  </placement>
+  <placement path="OPNsense/Firewall/Alias/aliases" mode="append">
+    <alias uuid="b5606ecf-17bf-5e51-8c63-22cb5377803b">
+      <enabled>1</enabled>
+      <name>BLOCKLIST_URLS</name>
+      <type>urltable</type>
+      <content>https://example.test/list.txt</content>
+      <updatefreq>7</updatefreq>
+      <description>URL table</description>
+      <proto/>
+      <counters>0</counters>
+    </alias>
+  </placement>
+  <placement path="OPNsense/Firewall/Alias/aliases" mode="append">
+    <alias uuid="f5792d79-d72b-5d15-9383-8d143cdb8611">
+      <enabled>1</enabled>
+      <name>MYGROUP</name>
+      <type>host</type>
+      <content>SERVER1
+192.168.2.11</content>
+      <description>Nested alias</description>
+      <proto/>
+      <counters>0</counters>
+    </alias>
+  </placement>
+</golden>

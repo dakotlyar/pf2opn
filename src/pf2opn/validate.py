@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from lxml import etree
 
 from .model import Plan
+from .translators.aliases import ALIAS_NAME_RE
 from .versions import MODEL_VERSIONS
 
 _VLAN_DEVICE = re.compile(r"^vlan0\d+$")
@@ -42,6 +43,9 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_unique_uuids(out))
     findings.extend(_check_interfaces(out))
     findings.extend(_check_vlan_parents(out, plan))
+    findings.extend(_check_gateways(out))
+    findings.extend(_check_routes(out))
+    findings.extend(_check_aliases(out))
     findings.extend(_check_versions(out))
     return findings
 
@@ -145,6 +149,79 @@ def _check_unique_uuids(out: etree._Element) -> list[Finding]:
             findings.append(Finding("error", f"duplicate uuid {uuid}", _path_of(el)))
         else:
             seen.add(uuid)
+    return findings
+
+
+def _check_gateways(out: etree._Element) -> list[Finding]:
+    """§13 check 6: gateway names are unique and their interfaces are assigned."""
+    findings: list[Finding] = []
+    interfaces = {iface.tag for iface in _interface_elements(out)}
+    seen: set[str] = set()
+    for gateway in out.findall("OPNsense/Gateways/gateway_item"):
+        name = (gateway.findtext("name") or "").strip()
+        if name in seen:
+            findings.append(
+                Finding("error", f"duplicate gateway name {name}", _path_of(gateway))
+            )
+        seen.add(name)
+        interface = (gateway.findtext("interface") or "").strip()
+        if interface and interface not in interfaces:
+            findings.append(
+                Finding(
+                    "error",
+                    f"gateway {name} uses interface {interface}, which is not assigned",
+                    _path_of(gateway),
+                )
+            )
+    return findings
+
+
+def _check_routes(out: etree._Element) -> list[Finding]:
+    """§13 check 7: every static route gateway exists."""
+    findings: list[Finding] = []
+    gateways = {
+        (gateway.findtext("name") or "").strip()
+        for gateway in out.findall("OPNsense/Gateways/gateway_item")
+    }
+    for route in out.findall("staticroutes/route"):
+        gateway = (route.findtext("gateway") or "").strip()
+        if gateway and gateway not in gateways:
+            findings.append(
+                Finding(
+                    "error",
+                    f"route {route.findtext('network')} uses unknown gateway {gateway}",
+                    _path_of(route),
+                )
+            )
+    return findings
+
+
+def _check_aliases(out: etree._Element) -> list[Finding]:
+    """§13 check 11: alias names are unique and nested references exist."""
+    findings: list[Finding] = []
+    aliases = out.findall("OPNsense/Firewall/Alias/aliases/alias")
+    names: set[str] = set()
+    for alias in aliases:
+        name = (alias.findtext("name") or "").strip()
+        if name in names:
+            findings.append(Finding("error", f"duplicate alias name {name}", _path_of(alias)))
+        names.add(name)
+    for alias in aliases:
+        if (alias.findtext("type") or "").strip() in {"url", "urltable"}:
+            continue
+        name = (alias.findtext("name") or "").strip()
+        for entry in (alias.findtext("content") or "").splitlines():
+            entry = entry.strip()
+            if not entry or entry in names:
+                continue
+            if ALIAS_NAME_RE.match(entry):
+                findings.append(
+                    Finding(
+                        "error",
+                        f"alias {name} references unknown alias {entry}",
+                        _path_of(alias),
+                    )
+                )
     return findings
 
 

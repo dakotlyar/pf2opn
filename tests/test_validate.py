@@ -42,6 +42,56 @@ def test_unique_uuids_pass(minimal_plan) -> None:
     assert _errors(validate(out, plan)) == []
 
 
+def test_gateway_on_missing_interface_is_an_error(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        '<opnsense><interfaces><wan><if>igc0</if></wan></interfaces>'
+        "<OPNsense><Gateways><gateway_item><name>G</name>"
+        "<interface>opt9</interface></gateway_item></Gateways></OPNsense></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("opt9" in finding.message for finding in findings)
+
+
+def test_route_with_unknown_gateway_is_an_error(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><staticroutes><route><network>10.0.0.0/8</network>"
+        "<gateway>GHOST</gateway></route></staticroutes></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("GHOST" in finding.message for finding in findings)
+
+
+def test_duplicate_alias_name_is_an_error(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Alias><aliases>"
+        "<alias><name>X</name><type>host</type><content>1.2.3.4</content></alias>"
+        "<alias><name>X</name><type>host</type><content>5.6.7.8</content></alias>"
+        "</aliases></Alias></Firewall></OPNsense></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("duplicate alias name X" in finding.message for finding in findings)
+
+
+def test_alias_with_unknown_nested_alias_is_an_error(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Alias><aliases>"
+        "<alias><name>X</name><type>host</type><content>GHOST</content></alias>"
+        "</aliases></Alias></Firewall></OPNsense></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("references unknown alias GHOST" in finding.message for finding in findings)
+
+
+def test_m4_outputs_validate_without_errors(aliases_plan, misc_plan) -> None:
+    for src, plan in (aliases_plan, misc_plan):
+        out = build_output(plan, src)
+        assert _errors(validate(out, plan)) == []
+
+
 def test_version_mismatch_is_a_warning(minimal_plan) -> None:
     _src, plan = minimal_plan
     out = _el(

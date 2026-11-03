@@ -1,0 +1,18 @@
+<golden>
+  <placement path="virtualip" mode="append">
+    <vip uuid="c479e007-04f9-549f-a1a6-e18da9919a59">
+      <mode>carp</mode>
+      <interface>lan</interface>
+      <subnet>192.168.1.2</subnet>
+      <subnet_bits>24</subnet_bits>
+      <descr>CARP VIP</descr>
+      <noexpand>0</noexpand>
+      <nobind>0</nobind>
+      <vhid>10</vhid>
+      <advbase>1</advbase>
+      <advskew>0</advskew>
+      <password>syntheticsecret</password>
+      <nosync>0</nosync>
+    </vip>
+  </placement>
+</golden>

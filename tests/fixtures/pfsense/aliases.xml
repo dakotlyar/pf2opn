@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>aliasbox</hostname>
+		<domain>example.test</domain>
+	</system>
+	<aliases>
+		<alias>
+			<name>RFC1918</name>
+			<type>network</type>
+			<address>10.0.0.0/8 172.16.0.0/12 192.168.0.0/16</address>
+			<descr>Private networks</descr>
+		</alias>
+		<alias>
+			<name>SERVER1</name>
+			<type>host</type>
+			<address>192.168.2.10</address>
+			<descr>Server one</descr>
+			<detail>Entry added by pfSense</detail>
+		</alias>
+		<alias>
+			<name>WEBPORTS</name>
+			<type>port</type>
+			<address>80 443</address>
+			<descr>Web ports</descr>
+		</alias>
+		<alias>
+			<name>BLOCKLIST_URLS</name>
+			<type>urltable</type>
+			<url>https://example.test/list.txt</url>
+			<updatefreq>7</updatefreq>
+			<descr>URL table</descr>
+		</alias>
+		<alias>
+			<name>MYGROUP</name>
+			<type>host</type>
+			<address>SERVER1 192.168.2.11</address>
+			<descr>Nested alias</descr>
+			<detail>some detail||another detail</detail>
+		</alias>
+		<alias>
+			<name>URL_PORTS</name>
+			<type>url_ports</type>
+			<url>https://example.test/ports.txt</url>
+		</alias>
+		<alias>
+			<name>pfB_ALIAS</name>
+			<type>host</type>
+			<address>1.2.3.4</address>
+		</alias>
+		<alias>
+			<name>any</name>
+			<type>host</type>
+			<address>1.2.3.4</address>
+		</alias>
+		<alias>
+			<name>1abc</name>
+			<type>host</type>
+			<address>1.2.3.4</address>
+		</alias>
+	</aliases>
+</pfsense>
