@@ -128,7 +128,7 @@ def _option_placements(
             sub(row, "tag", tag_uuid)
         sub(row, "value", value)
         placements.append(
-            Placement("dnsmasq/dhcp_options", Mode.APPEND, element=row, item_id=item.id)
+            Placement("dnsmasq", Mode.APPEND, element=row, item_id=item.id)
         )
     return placements
 
@@ -153,7 +153,7 @@ def _boot_placement(
     sub(row, "filename", filename)
     sub(row, "servername", pf_text(el, "tftp"))
     sub(row, "address", pf_text(el, "nextserver"))
-    return Placement("dnsmasq/dhcp_boot", Mode.APPEND, element=row, item_id=item.id)
+    return Placement("dnsmasq", Mode.APPEND, element=row, item_id=item.id)
 
 
 def _option_warnings(el: etree._Element) -> list[str]:
@@ -314,6 +314,10 @@ class DhcpRange(Translator):
         if subnet is None:
             return []
         key = item.data["interface"]
+        # `dhcp_ranges` is an ArrayField: each row is a repeated same-named
+        # `<dhcp_ranges uuid>` element directly under `<dnsmasq>` — there is no
+        # wrapper, so the paths below are `dnsmasq` / `dnsmasq/dhcp_ranges[…]`
+        # (§2.1, §12.1.11). A nested wrapper is silently ignored by the model.
         placements: list[Placement] = [
             # Replace the base's default range for this interface (§12.1.11): a
             # fresh 26.7 base ships a default LAN row, so the base row must go
@@ -322,14 +326,14 @@ class DhcpRange(Translator):
             # finalize, so a finalize REMOVE would delete the rows it had just
             # appended; flagged in the milestone report.
             Placement(
-                f"dnsmasq/dhcp_ranges/dhcp_ranges[interface='{key}']",
+                f"dnsmasq/dhcp_ranges[interface='{key}']",
                 Mode.REMOVE,
                 item_id=item.id,
             )
         ]
         for element in self._range_elements(subnet, item, ctx):
             placements.append(
-                Placement("dnsmasq/dhcp_ranges", Mode.APPEND, element=element, item_id=item.id)
+                Placement("dnsmasq", Mode.APPEND, element=element, item_id=item.id)
             )
         placements.extend(
             _option_placements(item, ctx, subnet, interface=key, tag_uuid="", suffix="")
@@ -563,7 +567,7 @@ class DhcpStatic(Translator):
             tag_row = E("dhcp_tags", uuid=tag_uuid)
             sub(tag_row, "tag", tag)
             placements.append(
-                Placement("dnsmasq/dhcp_tags", Mode.APPEND, element=tag_row, item_id=item.id)
+                Placement("dnsmasq", Mode.APPEND, element=tag_row, item_id=item.id)
             )
 
         host = E("hosts", uuid=ctx.uuid(item.id))
@@ -584,7 +588,7 @@ class DhcpStatic(Translator):
         sub(host, "ignore", "0")
         sub(host, "aliases", "")
         placements.append(
-            Placement("dnsmasq/hosts", Mode.APPEND, element=host, item_id=item.id)
+            Placement("dnsmasq", Mode.APPEND, element=host, item_id=item.id)
         )
 
         if tag_uuid:

@@ -62,8 +62,8 @@ def test_apply_append() -> None:
 
 def test_apply_append_creates_missing_container() -> None:
     out = _el("<opnsense/>")
-    apply(out, [Placement("dnsmasq/hosts", Mode.APPEND, element=etree.Element("hosts"))])
-    assert out.find("dnsmasq/hosts/hosts") is not None
+    apply(out, [Placement("foo/bar", Mode.APPEND, element=etree.Element("baz"))])
+    assert out.find("foo/bar/baz") is not None
 
 
 def test_apply_replace_keeps_position() -> None:

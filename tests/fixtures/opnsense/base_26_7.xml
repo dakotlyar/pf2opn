@@ -101,16 +101,11 @@
 		<dhcp>
 			<fqdn>0</fqdn>
 		</dhcp>
-		<dhcp_ranges>
-			<dhcp_ranges uuid="33333333-3333-4333-8333-333333333333">
-				<interface>lan</interface>
-				<start_addr>192.168.1.100</start_addr>
-				<end_addr>192.168.1.199</end_addr>
-			</dhcp_ranges>
+		<dhcp_ranges uuid="33333333-3333-4333-8333-333333333333">
+			<interface>lan</interface>
+			<start_addr>192.168.1.100</start_addr>
+			<end_addr>192.168.1.199</end_addr>
 		</dhcp_ranges>
-		<hosts></hosts>
-		<dhcp_tags></dhcp_tags>
-		<dhcp_options></dhcp_options>
 	</dnsmasq>
 	<nat>
 		<outbound>

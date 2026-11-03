@@ -1,5 +1,5 @@
 <golden>
-  <placement path="dnsmasq/hosts" mode="append">
+  <placement path="dnsmasq" mode="append">
     <hosts uuid="92767acb-8529-54c9-bb88-984072db3a5c">
       <hwaddr>8c:ce:4e:4b:9e:52</hwaddr>
       <client_id/>
@@ -14,12 +14,12 @@
       <aliases/>
     </hosts>
   </placement>
-  <placement path="dnsmasq/dhcp_tags" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_tags uuid="95d9d9a7-4f92-54b8-9373-b27231502bfc">
       <tag>pf2opn_lan_8c_ce_4e_4b_9e_53</tag>
     </dhcp_tags>
   </placement>
-  <placement path="dnsmasq/hosts" mode="append">
+  <placement path="dnsmasq" mode="append">
     <hosts uuid="1ba89131-1281-5485-b899-84e251a50cc4">
       <hwaddr>8c:ce:4e:4b:9e:53</hwaddr>
       <client_id/>
@@ -36,7 +36,7 @@
       <aliases/>
     </hosts>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="7eea9777-ab42-56b6-aa9a-1cbe84c6ee39">
       <type>set</type>
       <option>3</option>
@@ -44,7 +44,7 @@
       <value>192.168.1.1</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="37819e49-564e-5c11-9c03-5cd08b5a6a87">
       <type>set</type>
       <option>6</option>
@@ -52,7 +52,7 @@
       <value>1.1.1.1</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="d6af10a2-df9e-5ca6-b0aa-e77a5f4e2809">
       <type>set</type>
       <option>15</option>
@@ -60,7 +60,7 @@
       <value>perhost.example.test</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/hosts" mode="append">
+  <placement path="dnsmasq" mode="append">
     <hosts uuid="b31f62a1-3476-5f01-b1a3-26ca47e5cd47">
       <hwaddr>aa:bb:cc:dd:ee:99</hwaddr>
       <client_id/>

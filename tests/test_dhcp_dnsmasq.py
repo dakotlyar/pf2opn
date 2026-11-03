@@ -58,7 +58,7 @@ def test_range_render_replaces_base_range_not_duplicates(dhcp_plan) -> None:
     placements = translator.render(plan.by_id["dhcp:lan"], ctx)
 
     assert placements[0].mode == Mode.REMOVE
-    assert placements[0].path == "dnsmasq/dhcp_ranges/dhcp_ranges[interface='lan']"
+    assert placements[0].path == "dnsmasq/dhcp_ranges[interface='lan']"
 
     rows = [
         p.element
@@ -130,7 +130,11 @@ def test_per_interface_options_render_as_dhcp_options_and_boot(dhcp_plan) -> Non
     ctx = WriteContext(src, plan)
     placements = translator.render(plan.by_id["dhcp:lan"], ctx)
 
-    options = {p.element.findtext("option"): p.element for p in placements if p.path.endswith("dhcp_options")}
+    options = {
+        p.element.findtext("option"): p.element
+        for p in placements
+        if p.element is not None and p.element.tag == "dhcp_options"
+    }
     assert options["3"].findtext("value") == "192.168.1.1"
     assert options["6"].findtext("value") == "192.168.1.1,9.9.9.9"
     assert options["15"].findtext("value") == "lan.example.test"
@@ -139,7 +143,7 @@ def test_per_interface_options_render_as_dhcp_options_and_boot(dhcp_plan) -> Non
     assert all(o.findtext("type") == "set" for o in options.values())
 
     opt1 = translator.render(plan.by_id["dhcp:opt1"], ctx)
-    boot = [p.element for p in opt1 if p.path.endswith("dhcp_boot")]
+    boot = [p.element for p in opt1 if p.element is not None and p.element.tag == "dhcp_boot"]
     assert len(boot) == 1
     assert boot[0].findtext("filename") == "pxelinux.0"
     assert boot[0].findtext("servername") == "10.0.10.5"
@@ -184,19 +188,19 @@ def test_per_host_options_create_tag_and_tagged_rows(dhcp_plan) -> None:
         plan.by_id["dhcpres:lan:8c:ce:4e:4b:9e:53"], ctx
     )
     paths = [p.path for p in placements]
-    assert "dnsmasq/dhcp_tags" in paths
-    tag_row = next(p.element for p in placements if p.path.endswith("dhcp_tags"))
+    assert all(path == "dnsmasq" for path in paths)
+    tag_row = next(p.element for p in placements if p.element.tag == "dhcp_tags")
     assert tag_row.findtext("tag") == "pf2opn_lan_8c_ce_4e_4b_9e_53"
     # set_tag/tag are relations to the dhcp_tags row uuid, never the tag text (§12.1.11).
     tag_uuid = tag_row.get("uuid")
 
-    host = next(p.element for p in placements if p.path.endswith("dnsmasq/hosts"))
+    host = next(p.element for p in placements if p.element.tag == "hosts")
     assert host.findtext("set_tag") == tag_uuid
     assert host.findtext("set_tag") != "pf2opn_lan_8c_ce_4e_4b_9e_53"
     assert host.findtext("domain") == "perhost.example.test"
 
     tagged_options = [
-        p.element for p in placements if p.path.endswith("dhcp_options")
+        p.element for p in placements if p.element.tag == "dhcp_options"
     ]
     assert {o.findtext("option") for o in tagged_options} == {"3", "6", "15"}
     assert all(o.findtext("tag") == tag_uuid for o in tagged_options)
@@ -219,11 +223,29 @@ def test_finalize_sets_enable_fqdn_and_interface_list(dhcp_plan) -> None:
 def test_base_default_range_is_gone_after_build(dhcp_plan) -> None:
     src, plan = dhcp_plan
     out = build_output(plan, src)
-    rows = out.findall("dnsmasq/dhcp_ranges/dhcp_ranges")
+    rows = out.findall("dnsmasq/dhcp_ranges")
     lan_rows = [row for row in rows if row.findtext("interface") == "lan"]
     assert len(lan_rows) == 1
     # the base's default 192.168.1.100-199 row was replaced by ours, not kept
     assert lan_rows[0].get("uuid") != "33333333-3333-4333-8333-333333333333"
+
+
+def test_dnsmasq_entries_are_direct_siblings(dhcp_plan) -> None:
+    """§2.1/§12.1.11: ArrayField rows are direct children of <dnsmasq>, no wrapper."""
+    src, plan = dhcp_plan
+    out = build_output(plan, src)
+    dnsmasq = out.find("dnsmasq")
+
+    ranges = out.findall("dnsmasq/dhcp_ranges")
+    hosts = out.findall("dnsmasq/hosts")
+    options = out.findall("dnsmasq/dhcp_options")
+    tags = out.findall("dnsmasq/dhcp_tags")
+    assert ranges and hosts and options and tags
+    # not nested under a same-named wrapper element
+    for field in ("dhcp_ranges", "hosts", "dhcp_options", "dhcp_tags"):
+        assert dnsmasq.find(f"{field}/{field}") is None
+    for row in ranges + hosts + options + tags:
+        assert row.getparent() is dnsmasq
 
 
 def test_unbound_query_forward_is_emitted_and_ports_do_not_collide(dhcp_plan) -> None:

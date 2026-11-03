@@ -1,6 +1,6 @@
 <golden>
-  <placement path="dnsmasq/dhcp_ranges/dhcp_ranges[interface='lan']" mode="remove"/>
-  <placement path="dnsmasq/dhcp_ranges" mode="append">
+  <placement path="dnsmasq/dhcp_ranges[interface='lan']" mode="remove"/>
+  <placement path="dnsmasq" mode="append">
     <dhcp_ranges uuid="0d6049de-57dc-5310-a422-6baa01242d33">
       <interface>lan</interface>
       <start_addr>192.168.1.100</start_addr>
@@ -12,7 +12,7 @@
       <description>pf2opn: LAN</description>
     </dhcp_ranges>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="540d0dcd-8ba1-5736-9a94-e0f83fdb0aa3">
       <type>set</type>
       <option>3</option>
@@ -20,7 +20,7 @@
       <value>192.168.1.1</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="969ad642-0fbf-5251-a0ae-9887d8a60ee3">
       <type>set</type>
       <option>6</option>
@@ -28,7 +28,7 @@
       <value>192.168.1.1,9.9.9.9</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="428155ea-95e1-5123-b075-295917bbdc6c">
       <type>set</type>
       <option>15</option>
@@ -36,7 +36,7 @@
       <value>lan.example.test</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="d2ce5722-fc9c-5897-85e9-e842dc006977">
       <type>set</type>
       <option>119</option>
@@ -44,7 +44,7 @@
       <value>lan.example.test,example.test</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_options" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_options uuid="889e0e12-83c1-5fe6-9430-d6b80c3ff7a1">
       <type>set</type>
       <option>42</option>
@@ -52,8 +52,8 @@
       <value>192.168.1.1</value>
     </dhcp_options>
   </placement>
-  <placement path="dnsmasq/dhcp_ranges/dhcp_ranges[interface='opt1']" mode="remove"/>
-  <placement path="dnsmasq/dhcp_ranges" mode="append">
+  <placement path="dnsmasq/dhcp_ranges[interface='opt1']" mode="remove"/>
+  <placement path="dnsmasq" mode="append">
     <dhcp_ranges uuid="2169d5a1-3c9a-56b4-9215-f242ad926f16">
       <interface>opt1</interface>
       <start_addr>10.0.10.100</start_addr>
@@ -62,7 +62,7 @@
       <description>pf2opn: OPT1 lab</description>
     </dhcp_ranges>
   </placement>
-  <placement path="dnsmasq/dhcp_ranges" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_ranges uuid="ca1d3fcc-76bb-59ab-9ee7-cddcb7f5fef8">
       <interface>opt1</interface>
       <start_addr>10.0.10.200</start_addr>
@@ -71,7 +71,7 @@
       <description>pf2opn: OPT1 lab</description>
     </dhcp_ranges>
   </placement>
-  <placement path="dnsmasq/dhcp_boot" mode="append">
+  <placement path="dnsmasq" mode="append">
     <dhcp_boot uuid="39360ac3-8c8f-58fb-9107-943c6bcee267">
       <interface>opt1</interface>
       <filename>pxelinux.0</filename>

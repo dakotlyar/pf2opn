@@ -90,10 +90,10 @@ def test_dnsmasq_static_range_with_end_addr_is_an_error(minimal_plan) -> None:
     """§13 check 8: `mode=static` must not coexist with a non-empty `end_addr`."""
     _src, plan = minimal_plan
     out = _el(
-        '<opnsense><dnsmasq><dhcp_ranges><dhcp_ranges uuid="a">'
+        '<opnsense><dnsmasq><dhcp_ranges uuid="a">'
         "<interface>lan</interface><start_addr>192.168.1.0</start_addr>"
         "<end_addr>192.168.1.10</end_addr><mode>static</mode>"
-        "</dhcp_ranges></dhcp_ranges></dnsmasq></opnsense>"
+        "</dhcp_ranges></dnsmasq></opnsense>"
     )
     findings = _errors(validate(out, plan))
     assert any("mode=static with a non-empty end_addr" in f.message for f in findings)
@@ -103,10 +103,10 @@ def test_dnsmasq_set_tag_must_be_a_row_uuid(minimal_plan) -> None:
     """§13 check 8: tag relations compare against the dhcp_tags row uuids, not the text."""
     _src, plan = minimal_plan
     out = _el(
-        '<opnsense><dnsmasq><dhcp_tags><dhcp_tags uuid="tag-uuid">'
-        "<tag>mytag</tag></dhcp_tags></dhcp_tags>"
-        '<hosts><hosts uuid="h"><ip>192.168.1.10</ip>'
-        "<set_tag>mytag</set_tag></hosts></hosts></dnsmasq></opnsense>"
+        '<opnsense><dnsmasq>'
+        '<dhcp_tags uuid="tag-uuid"><tag>mytag</tag></dhcp_tags>'
+        '<hosts uuid="h"><ip>192.168.1.10</ip>'
+        "<set_tag>mytag</set_tag></hosts></dnsmasq></opnsense>"
     )
     findings = _errors(validate(out, plan))
     assert any("unknown tag mytag" in f.message for f in findings)
@@ -115,10 +115,10 @@ def test_dnsmasq_set_tag_must_be_a_row_uuid(minimal_plan) -> None:
 def test_dnsmasq_set_tag_as_row_uuid_passes(minimal_plan) -> None:
     _src, plan = minimal_plan
     out = _el(
-        '<opnsense><dnsmasq><dhcp_tags><dhcp_tags uuid="tag-uuid">'
-        "<tag>mytag</tag></dhcp_tags></dhcp_tags>"
-        '<hosts><hosts uuid="h"><ip>192.168.1.10</ip>'
-        "<set_tag>tag-uuid</set_tag></hosts></hosts></dnsmasq></opnsense>"
+        '<opnsense><dnsmasq>'
+        '<dhcp_tags uuid="tag-uuid"><tag>mytag</tag></dhcp_tags>'
+        '<hosts uuid="h"><ip>192.168.1.10</ip>'
+        "<set_tag>tag-uuid</set_tag></hosts></dnsmasq></opnsense>"
     )
     assert _errors(validate(out, plan)) == []
 
@@ -313,12 +313,12 @@ def test_duplicate_reservation_names_ip_and_both_macs(minimal_plan) -> None:
     out = _el(
         "<opnsense><interfaces><lan><if>igc1</if>"
         "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
-        "<dnsmasq><hosts>"
+        "<dnsmasq>"
         '<hosts uuid="h1"><ip>192.168.1.10</ip>'
         "<hwaddr>aa:bb:cc:dd:ee:01</hwaddr></hosts>"
         '<hosts uuid="h2"><ip>192.168.1.10</ip>'
         "<hwaddr>aa:bb:cc:dd:ee:02</hwaddr></hosts>"
-        "</hosts></dnsmasq></opnsense>"
+        "</dnsmasq></opnsense>"
     )
     errors = _errors(validate(out, plan))
     message = next(f.message for f in errors if "duplicate" in f.message)
@@ -332,10 +332,10 @@ def test_reservation_outside_subnet_names_ip_and_mac(minimal_plan) -> None:
     out = _el(
         "<opnsense><interfaces><lan><if>igc1</if>"
         "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
-        "<dnsmasq><hosts>"
+        "<dnsmasq>"
         '<hosts uuid="h1"><ip>10.9.9.9</ip>'
         "<hwaddr>aa:bb:cc:dd:ee:03</hwaddr></hosts>"
-        "</hosts></dnsmasq></opnsense>"
+        "</dnsmasq></opnsense>"
     )
     errors = _errors(validate(out, plan))
     assert any(
@@ -421,8 +421,41 @@ def test_nat_ipv6_source_in_inet_rule_is_an_error(minimal_plan) -> None:
     )
 
 
-def test_nat_ipv4_target_in_inet6_rule_is_an_error(minimal_plan) -> None:
-    """§13 check 13: the reverse mismatch (IPv4 target, ipprotocol inet6) errors."""
+def test_nat_port_forward_address_endpoint_family_is_checked(minimal_plan) -> None:
+    """§13 check 13: an IPv6 ``<address>`` endpoint in an inet port forward errors.
+
+    The DNat endpoint stores its address in either ``network`` or ``address``;
+    reading ``network`` alone would silently miss this.
+    """
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><nat><rule><sequence>10</sequence>"
+        "<ipprotocol>inet</ipprotocol>"
+        "<source><network>any</network></source>"
+        "<destination><address>::1</address></destination>"
+        "<target>192.168.1.10</target></rule></nat></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        "destination/address" in f.message and "::1" in f.message and "inet6" in f.message
+        for f in errors
+    )
+
+
+def test_nat_port_forward_address_endpoint_matching_family_is_ok(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><nat><rule><sequence>10</sequence>"
+        "<ipprotocol>inet</ipprotocol>"
+        "<source><network>any</network></source>"
+        "<destination><address>192.168.1.10</address></destination>"
+        "<target>192.168.1.10</target></rule></nat></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_onetoone_is_a_check_13_no_op(minimal_plan) -> None:
+    """§13 check 13: the 1:1 model has no ``ipprotocol``; it must not be checked."""
     _src, plan = minimal_plan
     out = _el(
         "<opnsense><OPNsense><Firewall><Filter><onetoone><rule>"
@@ -432,8 +465,7 @@ def test_nat_ipv4_target_in_inet6_rule_is_an_error(minimal_plan) -> None:
         "<external>203.0.113.10/32</external></rule>"
         "</onetoone></Filter></Firewall></OPNsense></opnsense>"
     )
-    errors = _errors(validate(out, plan))
-    assert any("192.168.1.10/32" in f.message and "inet" in f.message for f in errors)
+    assert _errors(validate(out, plan)) == []
 
 
 def test_hybrid_outbound_maps_to_advanced_warning(minimal_plan) -> None:

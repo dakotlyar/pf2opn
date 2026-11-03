@@ -489,19 +489,36 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
 
 
 #: (xpath, rule kind, address fields) for the §13 check-13 family comparison.
+#: ``nat/rule`` is handled separately: its endpoints store the address in either
+#: ``network`` or ``address`` (``DNat.xml`` marks ``address`` volatile). The
+#: ``onetoone`` model has no ``ipprotocol`` field, so it is an explicit no-op.
 _NAT_FAMILY_CHECKS = (
-    ("nat/rule", "port-forward", ("source/network", "destination/network", "target")),
     (
         "OPNsense/Firewall/Filter/snatrules/rule",
         "outbound NAT",
         ("source_net", "destination_net", "target"),
     ),
-    (
-        "OPNsense/Firewall/Filter/onetoone/rule",
-        "1:1 NAT",
-        ("source_net", "destination_net", "external"),
-    ),
 )
+
+
+def _nat_endpoint_addresses(rule: etree._Element) -> list[tuple[str, str]]:
+    """The address-bearing values of a ``nat/rule`` port forward (§13 check 13).
+
+    Each ``source``/``destination`` endpoint carries its address in **either**
+    ``network`` **or** ``address`` — reading ``network`` alone silently misses
+    every ``<address>`` endpoint (single host / alias from ``_copy_endpoint``).
+    """
+    values: list[tuple[str, str]] = []
+    for side in ("source", "destination"):
+        endpoint = rule.find(side)
+        if endpoint is None:
+            continue
+        for child in ("network", "address"):
+            value = (endpoint.findtext(child) or "").strip()
+            if value:
+                values.append((f"{side}/{child}", value))
+    values.append(("target", (rule.findtext("target") or "").strip()))
+    return values
 
 
 def _address_family(value: str) -> str | None:
@@ -531,9 +548,28 @@ def _check_nat_families(out: etree._Element) -> list[Finding]:
     as ``::1/128`` in an ``inet`` rule makes ``pfctl`` reject the whole
     ``/tmp/rules.debug`` ("rule expands to no valid combination"), so this is an
     **error**. Only rules that carry an ``ipprotocol`` are checked; the
-    ``onetoone`` model has no such field, so those rules never mismatch.
+    ``onetoone`` model has no such field, so those rules are an explicit no-op
+    (§13 check 13).
     """
     findings: list[Finding] = []
+
+    for rule in out.findall("nat/rule"):
+        ipprotocol = (rule.findtext("ipprotocol") or "").strip()
+        if not ipprotocol:
+            continue
+        ident = _rule_ident(rule, "port-forward")
+        for field, value in _nat_endpoint_addresses(rule):
+            family = _address_family(value)
+            if family is not None and family != ipprotocol:
+                findings.append(
+                    Finding(
+                        "error",
+                        f"{ident}: {field} {value!r} is {family}, "
+                        f"but ipprotocol is {ipprotocol}",
+                        _path_of(rule),
+                    )
+                )
+
     for xpath, kind, fields in _NAT_FAMILY_CHECKS:
         for rule in out.findall(xpath):
             ipprotocol = (rule.findtext("ipprotocol") or "").strip()
@@ -559,7 +595,7 @@ def _dnsmasq_tag_uuids(out: etree._Element) -> set[str]:
     """The uuid attrs of the ``dhcp_tags`` rows (the relation targets, §13 check 8)."""
     return {
         uuid
-        for tag in out.findall("dnsmasq/dhcp_tags/dhcp_tags")
+        for tag in out.findall("dnsmasq/dhcp_tags")
         if (uuid := tag.get("uuid"))
     }
 
@@ -586,7 +622,7 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
     iface_keys = _output_iface_keys(out)
     tags = _dnsmasq_tag_uuids(out)
 
-    for row in out.findall("dnsmasq/dhcp_ranges/dhcp_ranges"):
+    for row in out.findall("dnsmasq/dhcp_ranges"):
         interface = (row.findtext("interface") or "").strip()
         if interface and interface not in iface_keys:
             findings.append(
@@ -609,8 +645,8 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
             )
 
     for field, kind in (
-        ("dnsmasq/dhcp_options/dhcp_options", "option"),
-        ("dnsmasq/dhcp_boot/dhcp_boot", "boot"),
+        ("dnsmasq/dhcp_options", "option"),
+        ("dnsmasq/dhcp_boot", "boot"),
     ):
         for row in out.findall(field):
             tag = (row.findtext("tag") or "").strip()
@@ -623,7 +659,7 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
                     )
                 )
 
-    for host in out.findall("dnsmasq/hosts/hosts"):
+    for host in out.findall("dnsmasq/hosts"):
         tag = (host.findtext("set_tag") or "").strip()
         if tag and tag not in tags:
             findings.append(
@@ -634,7 +670,7 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
                 )
             )
 
-    for option in out.findall("dnsmasq/dhcp_options/dhcp_options"):
+    for option in out.findall("dnsmasq/dhcp_options"):
         option_type = (option.findtext("type") or "").strip()
         if option_type != "set":
             findings.append(
@@ -648,7 +684,7 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
     networks = _interface_networks(out)
     #: reservation IP -> the MAC that claimed it first (a duplicate names both).
     seen: dict[str, str] = {}
-    for host in out.findall("dnsmasq/hosts/hosts"):
+    for host in out.findall("dnsmasq/hosts"):
         mac = _mac_of(host)
         raw = (host.findtext("ip") or "").strip()
         for ip in (part.strip() for part in raw.split(",")):
