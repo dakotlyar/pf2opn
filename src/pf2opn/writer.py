@@ -139,7 +139,7 @@ def _remove_merge_entry(
 
 
 def apply_base_policy(out: etree._Element, translator, selected, ctx: WriteContext) -> None:
-    policy = translator.base_policy
+    policy = translator.effective_base_policy(ctx)
     if policy == "none":
         return
     if policy == "replace":

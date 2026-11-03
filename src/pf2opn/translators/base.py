@@ -46,6 +46,14 @@ class Translator(ABC):
         """
         return None
 
+    def effective_base_policy(self, ctx: WriteContext) -> str:
+        """The §10.2 base policy in force for *ctx*.
+
+        Defaults to the class's :attr:`base_policy`; translators whose policy
+        depends on a run option (filter ``--keep-base-rules``) override it.
+        """
+        return self.base_policy
+
     def render(self, item: Item, ctx: WriteContext) -> list[Placement]:
         """Produce placements for one selected, non-UNSUPPORTED item."""
         return []

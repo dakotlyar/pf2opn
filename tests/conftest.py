@@ -68,6 +68,14 @@ def aliases_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def filter_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``filter.xml`` (fixed NIC map)."""
+    return _fixture_plan(
+        "filter.xml", opnsense_base, {"em0": "igc0", "em1": "igc1", "em2": "igc2"}
+    )
+
+
+@pytest.fixture
 def misc_plan(opnsense_base: Path):
     """(SourceContext, Plan) for ``misc.xml``."""
     return _fixture_plan(

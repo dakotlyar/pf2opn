@@ -7,6 +7,7 @@ mismatch (§10.3) is emitted here because it needs the output tree.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 
@@ -18,6 +19,9 @@ from .versions import MODEL_VERSIONS
 
 _VLAN_DEVICE = re.compile(r"^vlan0\d+$")
 _WG_DEVICE = re.compile(r"^wg(\d+)$")
+
+#: Interface tokens the firewall accepts that are not output interface keys.
+_VPN_IFACE_TOKENS = frozenset({"wireguard", "openvpn", "enc0"})
 
 
 @dataclass
@@ -46,8 +50,42 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_gateways(out))
     findings.extend(_check_routes(out))
     findings.extend(_check_aliases(out))
+    findings.extend(_check_filter_refs(out))
     findings.extend(_check_versions(out))
     return findings
+
+
+def _is_ip_or_cidr(value: str) -> bool:
+    try:
+        ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return False
+    return True
+
+
+def _net_token_ok(token: str, iface_keys: set[str], aliases: set[str]) -> bool:
+    """One ``*_net``/network token from §13 check 5."""
+    token = token.strip()
+    if not token or token in {"any", "(self)"}:
+        return True
+    base = token[:-2] if token.endswith("ip") else token
+    if base in iface_keys or base == "lo0":
+        return True
+    if token in aliases:
+        return True
+    return _is_ip_or_cidr(token)
+
+
+def _port_token_ok(token: str, aliases: set[str]) -> bool:
+    """One port token from §13 check 5: numeric, a range, or a port alias."""
+    token = token.strip()
+    if not token:
+        return True
+    if re.fullmatch(r"\d+", token):
+        return True
+    if re.fullmatch(r"\d+[-:]\d+", token):
+        return True
+    return token in aliases
 
 
 def _interface_elements(out: etree._Element) -> list[etree._Element]:
@@ -222,6 +260,63 @@ def _check_aliases(out: etree._Element) -> list[Finding]:
                         _path_of(alias),
                     )
                 )
+    return findings
+
+
+def _output_iface_keys(out: etree._Element) -> set[str]:
+    return {iface.tag for iface in _interface_elements(out)}
+
+
+def _output_alias_names(out: etree._Element) -> set[str]:
+    return {
+        (alias.findtext("name") or "").strip()
+        for alias in out.findall("OPNsense/Firewall/Alias/aliases/alias")
+    }
+
+
+def _output_gateway_names(out: etree._Element) -> set[str]:
+    return {
+        (gateway.findtext("name") or "").strip()
+        for gateway in out.findall("OPNsense/Gateways/gateway_item")
+    }
+
+
+def _check_filter_refs(out: etree._Element) -> list[Finding]:
+    """§13 check 5 (filter part): interfaces, nets, ports and gateways resolve."""
+    findings: list[Finding] = []
+    iface_keys = _output_iface_keys(out)
+    aliases = _output_alias_names(out)
+    gateways = _output_gateway_names(out)
+    for rule in out.findall("OPNsense/Firewall/Filter/rules/rule"):
+        path = _path_of(rule)
+        raw_interface = (rule.findtext("interface") or "").strip()
+        for token in (part.strip() for part in raw_interface.split(",")):
+            if token and token not in iface_keys and token not in _VPN_IFACE_TOKENS:
+                findings.append(
+                    Finding("error", f"filter rule references unknown interface {token}", path)
+                )
+        for field in ("source_net", "destination_net"):
+            value = (rule.findtext(field) or "").strip()
+            for token in (part.strip() for part in value.split(",")):
+                if token and not _net_token_ok(token, iface_keys, aliases):
+                    findings.append(
+                        Finding(
+                            "error",
+                            f"filter rule {field} references unknown token {token}",
+                            path,
+                        )
+                    )
+        for field in ("source_port", "destination_port"):
+            value = (rule.findtext(field) or "").strip()
+            if value and not _port_token_ok(value, aliases):
+                findings.append(
+                    Finding("error", f"filter rule {field} is not a valid port {value!r}", path)
+                )
+        gateway = (rule.findtext("gateway") or "").strip()
+        if gateway and gateway not in gateways:
+            findings.append(
+                Finding("error", f"filter rule uses unknown gateway {gateway}", path)
+            )
     return findings
 
 

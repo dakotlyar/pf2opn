@@ -1,0 +1,418 @@
+<golden>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="d026347d-4870-5792-9d11-5a39cc1f05e5">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>10</sequence>
+      <action>pass</action>
+      <quick>0</quick>
+      <interfacenot>0</interfacenot>
+      <interface>wan,lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>TCP</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>float multi interface</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="7c6ad339-2222-573c-ab6d-418eabfa25c7">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>20</sequence>
+      <action>block</action>
+      <quick>0</quick>
+      <interfacenot>0</interfacenot>
+      <interface/>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>float any block</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="f6922f3a-23dd-5150-8abc-9554ad7fc711">
+      <enabled>0</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>30</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>disabled rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="323e07dd-2e1b-5484-ad9f-a611c6fe238a">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>40</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>enabled on rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="812e2379-1e70-54a8-8bd7-a420d1aa51ce">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>50</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway>OPT1_GW</gateway>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>gateway rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="e255fb52-a31f-5f4f-8d13-c246b0215cd8">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>60</sequence>
+      <action>block</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>RFC1918</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>203.0.113.0/24</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>alias rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="9c2e0f86-b12b-5507-93d2-02b7dbc52108">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>70</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>TCP</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port>WEBPORTS</destination_port>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>port alias rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="dfb176fb-12f3-5832-be64-32fb648e0902">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>80</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>wan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>(self)</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>self rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="f639e251-c24b-5a48-b4b1-8755e667061c">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>90</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>opt1ip</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>opt1ip rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="ed8a657a-ecd6-56fc-b692-915de631c5cf">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>100</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>ICMP</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>icmp any rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="6ee6987f-22f7-5ba4-b8c0-8079a3468136">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>110</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>wireguard</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>wireguard rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="86417b17-6fec-5448-8a0a-b485a1dd95a7">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>130</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>wan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port>8443</destination_port>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>port forward auto rule</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/rules" mode="append">
+    <rule uuid="c5f7123b-f64e-5cfa-9dde-3d041e345842">
+      <enabled>1</enabled>
+      <statetype>keep</statetype>
+      <state-policy/>
+      <sequence>150</sequence>
+      <action>pass</action>
+      <quick>1</quick>
+      <interfacenot>0</interfacenot>
+      <interface>lan</interface>
+      <direction>in</direction>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <icmptype/>
+      <icmp6type/>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <gateway/>
+      <replyto/>
+      <disablereplyto>0</disablereplyto>
+      <log>0</log>
+      <allowopts>0</allowopts>
+      <nosync>0</nosync>
+      <nopfsync>0</nopfsync>
+      <tcpflags_any>0</tcpflags_any>
+      <description>junk state policy</description>
+    </rule>
+  </placement>
+</golden>

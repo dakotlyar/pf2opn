@@ -3,4 +3,4 @@
 Each milestone adds its modules here; the import is the registration side effect.
 """
 
-from . import aliases, gateways, interfaces, routes, system, vips, vlans  # noqa: F401
+from . import aliases, filter, gateways, interfaces, routes, system, vips, vlans  # noqa: F401

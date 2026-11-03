@@ -1,0 +1,213 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>filterbox</hostname>
+		<domain>example.test</domain>
+	</system>
+	<interfaces>
+		<wan>
+			<if>em0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+		</wan>
+		<lan>
+			<if>em1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+		<opt1>
+			<if>em2</if>
+			<descr>OPT1</descr>
+			<enable></enable>
+			<ipaddr>10.0.10.1</ipaddr>
+			<subnet>24</subnet>
+		</opt1>
+	</interfaces>
+	<aliases>
+		<alias>
+			<name>RFC1918</name>
+			<type>network</type>
+			<address>10.0.0.0/8 172.16.0.0/12 192.168.0.0/16</address>
+			<descr>private networks</descr>
+		</alias>
+		<alias>
+			<name>WEBPORTS</name>
+			<type>port</type>
+			<address>80 443</address>
+			<descr>web ports</descr>
+		</alias>
+		<alias>
+			<name>pfB_ALIAS</name>
+			<type>host</type>
+			<address>198.51.100.0/24</address>
+			<descr>pfBlockerNG list</descr>
+		</alias>
+	</aliases>
+	<gateways>
+		<defaultgw4>WAN_DHCP</defaultgw4>
+		<gateway_item>
+			<name>WAN_DHCP</name>
+			<descr>WAN DHCP</descr>
+			<interface>wan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>dynamic</gateway>
+		</gateway_item>
+		<gateway_item>
+			<name>OPT1_GW</name>
+			<descr>OPT1 gateway</descr>
+			<interface>opt1</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>10.0.10.254</gateway>
+		</gateway_item>
+	</gateways>
+	<filter>
+		<rule>
+			<type>pass</type>
+			<interface>wan,lan</interface>
+			<floating>yes</floating>
+			<direction>in</direction>
+			<ipprotocol>inet</ipprotocol>
+			<protocol>tcp</protocol>
+			<tracker>1000</tracker>
+			<descr>float multi interface</descr>
+		</rule>
+		<rule>
+			<type>block</type>
+			<interface>any</interface>
+			<floating>yes</floating>
+			<direction>in</direction>
+			<ipprotocol>inet</ipprotocol>
+			<tracker>1001</tracker>
+			<descr>float any block</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<disabled></disabled>
+			<tracker>1002</tracker>
+			<descr>disabled rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<enabled>on</enabled>
+			<tracker>1003</tracker>
+			<descr>enabled on rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>OPT1_GW</gateway>
+			<tracker>1004</tracker>
+			<descr>gateway rule</descr>
+		</rule>
+		<rule>
+			<type>block</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<source>
+				<network>RFC1918</network>
+			</source>
+			<destination>
+				<address>203.0.113.0/24</address>
+			</destination>
+			<tracker>1005</tracker>
+			<descr>alias rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<protocol>tcp</protocol>
+			<destination>
+				<any></any>
+				<port>WEBPORTS</port>
+			</destination>
+			<tracker>1006</tracker>
+			<descr>port alias rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>wan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<source>
+				<network>(self)</network>
+			</source>
+			<tracker>1007</tracker>
+			<descr>self rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<destination>
+				<network>opt1ip</network>
+			</destination>
+			<tracker>1008</tracker>
+			<descr>opt1ip rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<protocol>icmp</protocol>
+			<icmptype>any</icmptype>
+			<tracker>1009</tracker>
+			<descr>icmp any rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>WireGuard</interface>
+			<ipprotocol>inet</ipprotocol>
+			<tracker>1010</tracker>
+			<descr>wireguard rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>l2tp</interface>
+			<ipprotocol>inet</ipprotocol>
+			<tracker>1011</tracker>
+			<descr>l2tp rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>wan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<destination>
+				<any></any>
+				<port>8443</port>
+			</destination>
+			<associated-rule-id>nat_60000000000000.00000001</associated-rule-id>
+			<tracker>1012</tracker>
+			<descr>port forward auto rule</descr>
+		</rule>
+		<rule>
+			<type>block</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<source>
+				<network>pfB_ALIAS</network>
+			</source>
+			<tracker>1013</tracker>
+			<descr>block pfB list auto rule</descr>
+		</rule>
+		<rule>
+			<type>pass</type>
+			<interface>lan</interface>
+			<ipprotocol>inet</ipprotocol>
+			<state-policy>bogus-policy</state-policy>
+			<tracker>1014</tracker>
+			<descr>junk state policy</descr>
+		</rule>
+		<separator>
+			<text>section break</text>
+		</separator>
+	</filter>
+</pfsense>
