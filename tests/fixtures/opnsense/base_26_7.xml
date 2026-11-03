@@ -1,0 +1,125 @@
+<?xml version="1.0"?>
+<opnsense>
+	<theme>opnsense</theme>
+	<sysctl>
+		<item>
+			<tunable>net.inet.ip.forwarding</tunable>
+			<value>1</value>
+		</item>
+	</sysctl>
+	<system>
+		<optimization>normal</optimization>
+		<hostname>OPNsense</hostname>
+		<domain>localdomain</domain>
+		<dnsallowoverride>1</dnsallowoverride>
+		<timezone>Etc/UTC</timezone>
+		<user>
+			<name>root</name>
+			<scope>system</scope>
+			<password>$2y$10$BASEBASEBASEBASEBASEBASEBASEBASEBASEBASEBASEBASEBA</password>
+			<uid>0</uid>
+		</user>
+		<group>
+			<name>admins</name>
+			<description>System Administrators</description>
+			<scope>system</scope>
+			<gid>1999</gid>
+			<member>0</member>
+			<priv>page-all</priv>
+		</group>
+		<nextuid>2000</nextuid>
+		<nextgid>2000</nextgid>
+		<ssh>
+			<enabled>enabled</enabled>
+			<port>22</port>
+		</ssh>
+		<webgui>
+			<protocol>https</protocol>
+			<port>443</port>
+		</webgui>
+	</system>
+	<interfaces>
+		<wan>
+			<if>igc0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+			<subnet></subnet>
+		</wan>
+		<lan>
+			<if>igc1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+	</interfaces>
+	<OPNsense>
+		<Firewall>
+			<Alias version="1.0.1">
+				<aliases></aliases>
+			</Alias>
+			<Filter version="1.0.6">
+				<rules>
+					<rule uuid="11111111-1111-4111-8111-111111111111">
+						<type>pass</type>
+						<interface>lan</interface>
+						<ipprotocol>inet</ipprotocol>
+						<statetype>keep</statetype>
+						<direction>in</direction>
+						<quick>1</quick>
+						<description>default allow LAN to any rule</description>
+					</rule>
+					<rule uuid="22222222-2222-4222-8222-222222222222">
+						<type>pass</type>
+						<interface>lan</interface>
+						<ipprotocol>inet6</ipprotocol>
+						<statetype>keep</statetype>
+						<direction>in</direction>
+						<quick>1</quick>
+						<description>default allow LAN IPv6 to any rule</description>
+					</rule>
+				</rules>
+				<snatrules></snatrules>
+				<onetoone></onetoone>
+			</Filter>
+		</Firewall>
+		<unboundplus version="1.0.15">
+			<general>
+				<enabled>1</enabled>
+				<port>53</port>
+			</general>
+			<hosts></hosts>
+			<aliases></aliases>
+			<dots></dots>
+			<acls></acls>
+		</unboundplus>
+	</OPNsense>
+	<dnsmasq version="1.0.9">
+		<enable>1</enable>
+		<port>53053</port>
+		<dhcp>
+			<fqdn>0</fqdn>
+		</dhcp>
+		<dhcp_ranges>
+			<dhcp_ranges uuid="33333333-3333-4333-8333-333333333333">
+				<interface>lan</interface>
+				<start_addr>192.168.1.100</start_addr>
+				<end_addr>192.168.1.199</end_addr>
+			</dhcp_ranges>
+		</dhcp_ranges>
+		<hosts></hosts>
+		<dhcp_tags></dhcp_tags>
+		<dhcp_options></dhcp_options>
+	</dnsmasq>
+	<nat>
+		<outbound>
+			<mode>automatic</mode>
+		</outbound>
+	</nat>
+	<revision>
+		<username>root@OPNsense.localdomain</username>
+		<time>1700000000</time>
+		<description>/config.xml made by OPNsense</description>
+	</revision>
+</opnsense>

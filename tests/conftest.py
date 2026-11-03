@@ -34,6 +34,22 @@ def opnsense_base() -> Path:
 
 
 @pytest.fixture
+def minimal_path(pfsense_dir: Path) -> Path:
+    return pfsense_dir / "minimal.xml"
+
+
+@pytest.fixture
+def minimal_plan(minimal_path: Path, opnsense_base: Path):
+    """(SourceContext, Plan) for the minimal fixture with a fixed NIC map."""
+    from pf2opn.context import SourceContext
+    from pf2opn.plan import build_default_ifmap, build_plan
+
+    src = SourceContext.load(minimal_path, opnsense_base)
+    ifmap = build_default_ifmap(src, {"em0": "igc0", "em1": "igc1"})
+    return src, build_plan(src, ifmap)
+
+
+@pytest.fixture
 def golden_checker(request: pytest.FixtureRequest) -> Callable[[str, str], None]:
     """Return a callable comparing a string against a golden file.
 

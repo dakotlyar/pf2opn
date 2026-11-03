@@ -1,17 +1,19 @@
-"""Command-line entry point (design §9).
-
-This M0 skeleton defines the argument surface for ``inspect``, ``migrate`` and
-``tui``; the handlers are filled in by later milestones (inspect in M1, migrate
-in M2, the TUI in M11).
-"""
+"""Command-line entry point (design §9)."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Sequence
 
+from lxml import etree
+
 from . import __version__
+from .context import SourceContext
+from .plan import build_default_ifmap, build_plan
+from .model import Plan
+from .registry import all_translators
 
 _PROG = "pf2opn"
 
@@ -57,8 +59,56 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class UsageError(Exception):
+    """An input/usage problem; ``main`` maps this to exit code 2."""
+
+
+# --------------------------------------------------------------------------- #
+# inspect
+# --------------------------------------------------------------------------- #
+
+
+def _load_plan(source: str, base: str) -> tuple[SourceContext, Plan]:
+    try:
+        src = SourceContext.load(source, base)
+    except (OSError, ValueError, etree.XMLSyntaxError) as exc:
+        raise UsageError(str(exc)) from exc
+    ifmap = build_default_ifmap(src)
+    return src, build_plan(src, ifmap)
+
+
+def _item_json(item) -> dict:
+    return {
+        "id": item.id,
+        "section": item.section,
+        "label": item.label,
+        "status": item.status.value,
+        "reason": item.reason,
+        "warnings": list(item.warnings),
+        "deps": list(item.deps),
+    }
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
-    raise NotImplementedError("inspect is implemented in milestone M1")
+    _src, plan = _load_plan(args.source, args.base)
+    if args.json:
+        print(json.dumps([_item_json(item) for item in plan.items], indent=2))
+        return 0
+
+    titles = {translator.section: translator.title for translator in all_translators()}
+    current_section = None
+    for item in plan.items:
+        if item.section != current_section:
+            current_section = item.section
+            print(f"== {titles.get(item.section, item.section)} ==")
+        suffix = f"  [{len(item.warnings)} warnings]" if item.warnings else ""
+        print(f"{item.status.value.upper():<11} {item.id:<28} {item.label}{suffix}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# migrate / tui
+# --------------------------------------------------------------------------- #
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
@@ -86,6 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     handler = _HANDLERS[args.command]
     try:
         return handler(args)
+    except UsageError as exc:
+        print(f"pf2opn: {exc}", file=sys.stderr)
+        return 2
     except NotImplementedError as exc:
         print(f"pf2opn: {exc}", file=sys.stderr)
         return 2

@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>pfbox</hostname>
+		<domain>example.test</domain>
+		<timezone>Etc/UTC</timezone>
+		<timeservers>0.pool.ntp.org 1.pool.ntp.org</timeservers>
+		<dnsserver>1.1.1.1</dnsserver>
+		<dnsserver>8.8.8.8</dnsserver>
+		<dnsallowoverride></dnsallowoverride>
+		<ssh>
+			<enable>enabled</enable>
+			<port>22</port>
+		</ssh>
+		<primaryconsole>video</primaryconsole>
+		<webgui>
+			<protocol>https</protocol>
+			<port>443</port>
+		</webgui>
+		<user>
+			<name>admin</name>
+			<scope>system</scope>
+			<bcrypt-hash>$2y$10$abcdefghijklmnopqrstuvwx0123456789abcdefghij</bcrypt-hash>
+		</user>
+	</system>
+	<interfaces>
+		<wan>
+			<if>em0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+			<subnet></subnet>
+		</wan>
+		<lan>
+			<if>em1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+	</interfaces>
+</pfsense>
