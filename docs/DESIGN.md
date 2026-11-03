@@ -1,7 +1,8 @@
 # pf2opn — Design Spec
 
 Status: **design, ready for implementation** (author: Sabine, 2026-11-03; OPNsense facts re-verified against
-`opnsense/core` 26.7.8 the same day — see §19)
+`opnsense/core` 26.7.8 the same day — see §19; Dave answered the seven open questions on 2026-11-03 and
+they are folded in as a decisions record — see §18)
 Target: **OPNsense 26.7.x** (latest stable tag `26.7.8`, released 2026-10-30; `27.1.a` is a dev tag)
 Source: **pfSense config.xml** (`<pfsense><version>24.0</version>` — the pfSense CE 2.7.x/2.8.x config format)
 
@@ -57,8 +58,8 @@ Sources I read (all under `https://github.com/opnsense/core/blob/26.7.8/`):
 | `Interfaces/Vlan.xml` | `/vlans` | 1.0.0 |
 | `Interfaces/Vip.xml` | `/virtualip` | 1.0.1 |
 | `Interfaces/NetworkInterface.xml` | `:memory:` (a view over legacy `<interfaces>`) | – |
-| `Kea/KeaDhcpv4.xml` | `//OPNsense/Kea/dhcp4` | 1.0.7 |
 | `Dnsmasq/Dnsmasq.xml` | `/dnsmasq` | 1.0.9 |
+| `Kea/KeaDhcpv4.xml` | `//OPNsense/Kea/dhcp4` | 1.0.7 |
 | `Unbound/Unbound.xml` | `//OPNsense/unboundplus` | 1.0.15 |
 | `Wireguard/Server.xml` / `Client.xml` / `General.xml` | `//OPNsense/wireguard/{server,client,general}` | 1.0.1 / 1.0.0 / 0.0.1 |
 | `Trust/Ca.xml` / `Trust/Cert.xml` | `/ca+` / `/cert+` | 1.0.0 |
@@ -67,6 +68,9 @@ Sources I read (all under `https://github.com/opnsense/core/blob/26.7.8/`):
 | `Syslog/Syslog.xml` | `//OPNsense/Syslog` | 1.0.2 |
 | `Core/Tunables.xml` | `//sysctl` | 1.0.2 |
 | plugins `dns/ddclient/…/DynDNS/DynDNS.xml` (branch `stable/26.7`) | `//OPNsense/DynDNS` | 1.5.1 |
+
+> DHCPv4 is written to **Dnsmasq** (`Dnsmasq/Dnsmasq.xml`, mount `/dnsmasq`). The Kea row is kept only
+> because Kea is the one plausible *future* backend (§12.3); it is not used (see §18 Q1 / D5).
 
 Field transforms reference OPNsense's own converters:
 * `src/opnsense/scripts/filter/list_legacy_rules.php` converts legacy filter rules to MVC rules.
@@ -111,7 +115,9 @@ Config-format facts (from the model PHP):
   max 15 characters (e.g. `vlan01`, `vlan02`, `vlan0.1.104`). We generate the next free `vlan0N`; the
   validator rejects anything else, so this must be exact. (The spec previously cited
   `VlanSettingsController.php`; the rule lives in the model, not the controller.)
-* Kea/Unbound hostnames use `IsDNSName=Y`, so underscores are allowed.
+* Kea/Unbound hostnames use `IsDNSName=Y`, so underscores are allowed. Dnsmasq's own `HostnameField`
+  (`Dnsmasq/FieldTypes/HostnameField.php`) allows `_` too (regex `^(?![_-])[A-Za-z0-9_-]{1,63}$`), so
+  DHCP reservation hostnames keep underscores rather than being sanitized.
 * Filter rule address keywords (`NetworkAliasField`): `any`, `(self)`, `<ifkey>`,
   `<ifkey>ip`, alias names, IPs and CIDRs. This is the same vocabulary as pfSense.
 * Built-in interface groups (`GroupField`): `openvpn`, `enc0`, `wireguard`.
@@ -136,6 +142,15 @@ below are written the way they are. Do not "improve" them from memory:
 * `Kea/KeaDhcpv4`: `subnets/subnet4/subnet_id` is an `AutoNumberField`; `pools` is a newline `from-to` list
   (`KeaPoolsField`); `option_data/*` lists are comma-separated; `reservations/reservation/subnet` is a
   relation to `subnets`. Field names above are confirmed verbatim.
+* `Dnsmasq/Dnsmasq` (v1.0.9): DHCP ranges are `dhcp_ranges` (one `ArrayField` row per range: `interface`
+  `InterfaceField` with `AllowDynamic`, `start_addr` **Required**, optional `end_addr`, `mode` may be
+  `static`, `lease_time`, and `domain` + `domain_type` ∈ {`interface`,`range`}). Reservations and static
+  DNS host records share one table, `hosts` (`host`/`domain`/`ip` AsList in `ip`/`hwaddr` AsList/
+  `client_id`/`set_tag`/`descr`). Reusable tags are `dhcp_tags` (`tag`, unique). DHCP options are
+  `dhcp_options` (`type` ∈ {`set`,`match`}, numeric `option`/`option6`, `interface`, `tag`, `set_tag`,
+  `value`, `force`); boot is `dhcp_boot` (`filename` Required, `servername`, `address`, `interface`,
+  `tag`). There is **no per-interface enable flag** — see §12.1.11. The Kea facts above are kept for
+  reference only; nothing in the current design writes them.
 
 ---
 
@@ -147,8 +162,8 @@ below are written the way they are. Do not "improve" them from memory:
 | D2 | **`--base` is required.** Output = deep copy of base plus the selected items. | Building from scratch or from the bundled `config.xml.sample` would lose the target's real NIC names, root password, model `version` attributes, and firmware/plugin state. A wrong or missing `version` attribute makes OPNsense re-run model migrations on import (for example `MFP1_0_3` deletes `nat/npt`). That fails silently. |
 | D3 | **Keep pfSense logical interface keys** (`wan`, `lan`, `optN`) in the output and only remap *devices* (`mlxen1` → `igc1`, `mlxen1.10` → `vlan03`, `tun_wg0` → `wg0`). | Re-keying interfaces would mean rewriting every rule, NAT, DHCP, gateway and Unbound reference, with no user benefit. OPNsense uses the same key scheme. |
 | D4 | **Firewall rules → MVC** `OPNsense/Firewall/Filter/rules/rule`. **Outbound NAT → MVC `snatrules`.** **1:1 → MVC `onetoone`.** **Port forwards → `/nat/rule`** (the DNat model lives there). | Writing legacy `<filter><rule>` / `nat/outbound/rule` would work in 26.7, but both are on the way out. The user would then have to run the in-GUI migration assistant anyway. |
-| D5 | **DHCPv4 → Kea** (`OPNsense/Kea/dhcp4`). If Kea takes an interface, remove the base's Dnsmasq `dhcp_ranges` for that interface. If none are left, disable Dnsmasq. | ISC: it's a plugin and deprecated, so it's a dead end. Dnsmasq: it's the fresh-install default and registers DHCP names into DNS, but it has a different shape (no subnets, ranges keyed by interface, tag-based options). That makes the mapping lossier for per-subnet DNS/gateway/domain. **Open question Q1** (Dnsmasq can be added as a Tier 2 alternative translator). |
-| D6 | pfSense `unbound/regdhcpstatic` is replaced by **synthesizing Unbound host overrides from the DHCP static maps** (separate items, selected by default). | Kea doesn't feed Unbound in OPNsense, so static-map hostnames would stop resolving. Dynamic-lease names are lost. The report says so. |
+| D5 | **DHCPv4 → Dnsmasq** (`/dnsmasq`, model 1.0.9). One `dhcp_ranges` row per pfSense range; static maps become `hosts` entries. Clear the base's default `dhcp_ranges` for each migrated interface first. | **Kea** was rejected as *this box's* backend (it was the earlier draft): it does not register leases into DNS, which breaks the pfSense `regdhcp`/`regdhcpstatic` behaviour Dave relies on. **Dnsmasq** is the fresh-install default, does DHCPv4/6 + RA, and registers both dynamic and static leases into its own DNS. ISC: plugin and deprecated. Kea remains the only plausible future backend (HA/scalability, §12.3) but is out of scope here. |
+| D6 | Static DHCP maps are written as **Dnsmasq `hosts` entries** whose names Dnsmasq registers itself; the DHCP finalize emits **Unbound query-forwarding** for each local DHCP domain to Dnsmasq, so dynamic and static names both resolve through the box's resolver. The old **static-map → Unbound host-override synthesis** is **demoted to a fallback, default off**. | Dnsmasq *does* feed DNS, so the Kea-era synthesis ("nothing registers names") is now redundant and would duplicate records. The Unbound→Dnsmasq forward is the OPNsense-documented single-source mechanism. `dns_static_host` stays available but `default_selected=False` for setups that disable Dnsmasq DNS (§12.1.13). |
 | D7 | **Deterministic UUIDs**: `uuid5(PF2OPN_NS, item_id + "/" + suffix)`. | uuid4 makes golden tests impossible and cross-references harder (a peer's uuid has to be known before the server renders). A collision with base uuid4 values is negligible. The validator checks uniqueness anyway. |
 | D8 | Port-forward **associated filter rules are migrated as standalone MVC rules**. The DNat rule gets no `associated-rule-id`. | Re-creating OPNsense's "associated rule" linkage means generating legacy filter rules, which contradicts D4. pf semantics are the same. |
 | D9 | When ≥1 filter rule is selected, the **base's MVC filter rules are replaced** (they're the two default LAN allow rules). Override with `--keep-base-rules`. | Merging gives duplicate "allow LAN" rules, because pfSense has its own. |
@@ -231,7 +246,7 @@ pf2opn/
 │   │   ├── vips.py
 │   │   ├── filter.py
 │   │   ├── nat.py             # 3 translators: nat_pf, nat_out, nat_1to1
-│   │   ├── dhcp_kea.py        # 2 translators: dhcp_subnet, dhcp_static
+│   │   ├── dhcp_dnsmasq.py     # 2 translators: dhcp_range, dhcp_static
 │   │   ├── unbound.py         # dns_general, dns_host, dns_static_host, dns_domain, dns_acl
 │   │   ├── trust.py           # ca, cert
 │   │   ├── users.py           # user, group
@@ -393,7 +408,7 @@ class Plan:
 | nat_pf | `pf:<associated-rule-id or index>` | `pf:nat_5feb373550a854.47144861` |
 | nat_out | `snat#<index>` | `snat#3` |
 | nat_1to1 | `binat#<index>` | `binat#0` |
-| dhcp_subnet | `dhcp:<ifkey>` | `dhcp:opt1` |
+| dhcp_range | `dhcp:<ifkey>` | `dhcp:opt1` |
 | dhcp_static | `dhcpres:<ifkey>:<mac>` | `dhcpres:opt1:8c:ce:4e:4b:9e:51` |
 | dns_general | `dns:general` | |
 | dns_host | `dnshost:<host>.<domain>` | `dnshost:alderaan.home.asmartass.me` |
@@ -600,7 +615,7 @@ MODEL_VERSIONS = {   # path relative to <opnsense> -> version attr (26.7.8)
   "OPNsense/Firewall/Alias": "1.0.1",
   "OPNsense/Firewall/Filter": "1.0.6",
   "OPNsense/Gateways": "1.0.0",
-  "OPNsense/Kea/dhcp4": "1.0.7",
+  "dnsmasq": "1.0.9",
   "OPNsense/unboundplus": "1.0.15",
   "OPNsense/wireguard/server": "1.0.1",
   "OPNsense/wireguard/client": "1.0.0",
@@ -676,12 +691,12 @@ element), with a `uuid` attribute unless stated otherwise.
 | nat/rule | 1 | nat_pf (100) | `nat/rule[]` | §12.1.8 |
 | nat/outbound | 1 | nat_out (101) | `nat/outbound/mode` and `OPNsense/Firewall/Filter/snatrules/rule[]` | §12.1.9 |
 | nat/onetoone | 1 | nat_1to1 (102) | `OPNsense/Firewall/Filter/onetoone/rule[]` | §12.1.10 |
-| dhcpd | 1 | dhcp_subnet (110), dhcp_static (111) | `OPNsense/Kea/dhcp4/*` | §12.1.11 |
+| dhcpd | 1 | dhcp_range (110), dhcp_static (111) | `dnsmasq/dhcp_ranges` + `dnsmasq/hosts` | §12.1.11 |
 | unbound | 1 | dns_general (120), dns_host (121), dns_static_host (122), dns_domain (123), dns_acl (124) | `OPNsense/unboundplus/*` | §12.1.13 |
 | dyndnses | 1 | dyndns (130) | `OPNsense/DynDNS/*` (plugin os-ddclient) | §12.1.18 |
 | syslog | 1 | syslog (140) | `OPNsense/Syslog/destinations/destination[]` | §12.1.19 |
 | cron | 1 (classifier) | cron (150) | – (never written) | §12.1.16 |
-| dhcpdv6, RA | 2 | – | Kea dhcp6 / radvd | |
+| dhcpdv6, RA | 2 | – | Dnsmasq DHCPv6 / radvd | |
 | sysctl | 2 | – | `sysctl/item[]` | |
 | ifgroups | 2 | – | `ifgroups/ifgroupentry[]` | |
 | snmpd | 2 | – | os-net-snmp | |
@@ -913,58 +928,151 @@ source mask if external has none), `source_net`/`destination_net` (`any` / addre
 `description`, `natreflection` (copy if non-empty). If source, destination, or external is
 missing → UNSUPPORTED "incomplete 1:1 rule".
 
-#### 12.1.11 DHCPv4 → Kea (`dhcp_kea.py`)
-**Subnet items** (`dhcp:<ifkey>`, translator `dhcp_subnet`, base_policy `none`): one per
-`pf:dhcpd/<ifkey>` with `enable` present. A disabled one isn't listed. Deps:
-`iface:<ifkey>`. The interface must have a static IPv4 address, else UNSUPPORTED "Kea needs a
-static interface address".
+#### 12.1.11 DHCPv4 → Dnsmasq (`dhcp_dnsmasq.py`)
 
-Render → APPEND to `opn:OPNsense/Kea/dhcp4/subnets` a `subnet4` (uuid = `ctx.uuid("dhcp:<k>")`):
+Source: `pf:dhcpd/<ifkey>` (kept keyed by pfSense interface key, D3). Target: `opn:dnsmasq` — model
+`OPNsense/Dnsmasq/Dnsmasq.xml`, mount `/dnsmasq`, **version 1.0.9** (read from `26.7.8`; the containers
+`dhcp_ranges`, `hosts`, `dhcp_tags`, `dhcp_options`, `dhcp_boot` and every field below are verbatim from
+that model). Two translators keep the familiar item/de-dup/status shape:
 
-| opn `subnet4/…` | value |
+* `dhcp_range` (order 110, base_policy `none`): one item per **enabled** `pf:dhcpd/<ifkey>`, id
+  `dhcp:<ifkey>`; renders one or more `dhcp_ranges` rows.
+* `dhcp_static` (order 111, base_policy `none`): one item per `pf:dhcpd/<ifkey>/staticmap`, id
+  `dhcpres:<ifkey>:<mac>`; renders one `hosts` row; deps `dhcp:<ifkey>`.
+
+**Structural difference from the Kea draft: Dnsmasq has no subnet object.** A subnet is expressed as a
+*range* (`dhcp_ranges`, keyed by `interface`, with `start_addr` Required) plus per-interface tags on the
+DHCP options. There is **no per-interface enable flag**: DHCP is served on an interface the moment a
+`dhcp_ranges` row names it, with `dnsmasq/enable=1`. So "enable DHCP on this interface" means "write its
+range row and add the interface to `dnsmasq/interface`".
+
+**Range items** (`dhcp:<ifkey>`, translator `dhcp_range`).
+
+Discovery: one per `pf:dhcpd/<ifkey>` **with `enable` present** (a disabled subnet is not listed, as
+before). Deps: `iface:<ifkey>`; the interface needs a static IPv4 address, else UNSUPPORTED "Dnsmasq
+needs a static interface address".
+
+Render → APPEND to `opn:dnsmasq/dhcp_ranges` one `dhcp_ranges` element per range (uuid =
+`ctx.uuid("dhcp:<k>","r<n>")`):
+
+| opn `dhcp_ranges/…` | value |
 |---|---|
-| `subnet_id` | 1-based index among selected subnets, after the max `subnet_id` already in base |
-| `subnet` | network CIDR of iface `ipaddr/subnet` (via `ipaddress.ip_interface(...).network`) |
-| `valid_lifetime` | pf `defaultleasetime` if non-empty |
-| `next_server` | pf `nextserver` |
-| `option_data_autocollect` | `0` if any of pf `gateway`, `dnsserver`, `ntpserver` is set, else `1` |
-| `option_data/routers` | pf `gateway`, or the iface IP when autocollect=0 and gateway is empty; `none` → empty + warning |
-| `option_data/domain_name_servers` | pf `dnsserver[]` joined with `,`, or the iface IP when autocollect=0 and none are set |
-| `option_data/domain_name` | pf `domain` |
-| `option_data/domain_search` | pf `domainsearchlist` (`;`-separated) → `,` |
-| `option_data/ntp_servers` | pf `ntpserver[]` joined with `,` |
-| `option_data/tftp_server_name` | pf `tftp` |
-| `option_data/boot_file_name` | pf `filename` |
-| `match-client-id` | `1` |
-| `pools` | pf `range/from`-`range/to`, plus any `pool[]/range` entries, newline-joined |
+| `interface` | mapped iface key (excluded → UNSUPPORTED) |
+| `start_addr` | main row: pf `range/from`; each `pool[]/range` row: its own `from`. A subnet with **no** `range`/`pool` (static maps only) is written `mode=static` with `start_addr` = the interface's network address — see the open item below |
+| `end_addr` | pf `range/to` (main) / `pool/range/to` (pool); empty for a static-only subnet |
+| `subnet_mask` | empty — OPNsense auto-calculates it from the interface |
+| `mode` | `static` when pf `denyunknown` is present or the subnet has no dynamic range; else omitted |
+| `lease_time` | pf `defaultleasetime` if non-empty, else omitted (dnsmasq default 86400; `0` = infinite) |
+| `domain` | pf `domain` if non-empty |
+| `domain_type` | `interface` (so the domain also covers the interface's other ranges and its static reservations — the docs recommend this, and `range` requires a full `end_addr`) |
 | `description` | `"pf2opn: " + iface descr` |
 
-Warnings (PARTIAL) when non-empty: `failover_peerip` ("failover not migrated; Kea HA is
-different"), `mac_allow`/`mac_deny`/`denyunknown`, `ddnsdomain*` ("dynamic DNS updates not
-migrated; see Kea DDNS"), `numberoptions/item` ("custom DHCP options not migrated (Tier 2)"),
-`staticarp`, `ldap`, `rootpath`, `filename32/64/*arm`, `uefihttpboot`, and
-`maxleasetime`/`ignoreclientuids`.
+`pool[]/range` entries produce additional `dhcp_ranges` rows (same `interface`, no `domain`).
 
-`finalize(selected)` (subnets):
-* SET `OPNsense/Kea/dhcp4/general/enabled` = `1`.
-* SET `.../general/interfaces` = the comma-joined keys of the selected subnets (union with
-  any keys already in the base).
-* SET `.../general/fwrules` = `1`.
-* REMOVE `dnsmasq/dhcp_ranges[interface='<k>']` for every selected key. If no
-  `dnsmasq/dhcp_ranges` remain in the output, SET `dnsmasq/enable` = `0`. Add report
-  followup: "Dnsmasq DHCP disabled on <keys> in favour of Kea".
+**Static-map items** (`dhcpres:<ifkey>:<mac>`, translator `dhcp_static`).
 
-**Reservation items** (`dhcpres:<k>:<mac>`, translator `dhcp_static`, base_policy `none`): one
-per `pf:dhcpd/<k>/staticmap`. Deps: `dhcp:<k>`. `ipaddr` empty → UNSUPPORTED "Kea
-reservation needs an IP address". `ipaddr` outside the subnet → UNSUPPORTED.
+One per `pf:dhcpd/<ifkey>/staticmap`; the id de-dups on `ifkey`+`mac` (a MAC listed twice is one item).
+`ipaddr` empty → UNSUPPORTED "Dnsmasq reservation needs an IP address"; `ipaddr` outside the interface
+subnet → UNSUPPORTED.
 
-Render → APPEND to `opn:OPNsense/Kea/dhcp4/reservations` a `reservation`:
-`subnet` = `ctx.uuid("dhcp:<k>")`, `ip_address`←`ipaddr`, `hw_address`←`mac` (lower-case),
-`client_id`←`cid`, `hostname`←`hostname`, `description`←`pf_desc(descr)`,
-`next_server`←`nextserver`, `option_data/domain_name_servers`←`dnsserver[]` joined with
-`,`, `option_data/routers`←`gateway`, `option_data/domain_name`←`domain`,
-`option_data/boot_file_name`←`filename`. Drop `ddns*`/`arp_table_static_entry` with warnings
-as above.
+Render → APPEND to `opn:dnsmasq/hosts` a `hosts` element (uuid = `ctx.uuid("dhcpres:<k>:<mac>")`):
+
+| opn `hosts/…` | value |
+|---|---|
+| `hwaddr` | pf `mac` (lower-case) |
+| `client_id` | pf `cid` if non-empty |
+| `ip` | pf `ipaddr` (single IPv4 — the model allows only one address per reservation) |
+| `host` | pf `hostname` (may be empty; dnsmasq allows a reservation with only `ip`+`hwaddr`) |
+| `domain` | pf `domain` if non-empty (one row is both the DHCP reservation and a static host override) |
+| `descr` | `pf_desc(descr)` |
+| `comments`,`local`,`cnames`,`lease_time`,`ignore`,`aliases` | empty / `0` |
+
+Reservation semantics match pfSense: dnsmasq reserves that IP for that MAC and never offers it to a
+dynamic client. And because `hosts` is also dnsmasq's DNS host table, the name is registered for free —
+this is what replaces the Kea-era D6 synthesis (§12.1.13).
+
+**Subnet options: global vs per-range vs per-interface/per-host.**
+
+Dnsmasq has no "subnet options" block, so a pfSense per-subnet option lands at the lowest level that can
+express it: **global** (`dnsmasq/dhcp/*` — really only the default/FQDN domain, which falls back to
+`system/domain`), **per-range** (`dhcp_ranges.*`), or **per-interface / per-host** via a dnsmasq *tag*
+(`dhcp_options`, `dhcp_boot`). Dnsmasq sets an interface tag automatically on every request received on
+that interface, so `interface:<k>` means exactly "clients on this subnet"; a *named* tag (`dhcp_tags` +
+`set_tag`) is used only for options that one static reservation needs.
+
+| pf `dhcpd/<k>/…` | Dnsmasq target | level |
+|---|---|---|
+| `gateway` | `dhcp_options` `{type:set, option:"3", interface:<k>, value:<gw>}` (router) | per-interface |
+| `dnsserver[]` | `dhcp_options` `{type:set, option:"6", interface:<k>, value:<comma-joined>}` | per-interface |
+| `domain` | `dhcp_ranges.domain` + `domain_type=interface`, **and** `dhcp_options` `{option:"15", interface:<k>, value:<domain>}` | per-range + per-interface |
+| `domainsearchlist` | `dhcp_options` `{option:"119", interface:<k>, value:<`;`→`,`>}` — **PARTIAL**: dnsmasq wants an RFC 1035-encoded search list | per-interface |
+| `ntpserver[]` | `dhcp_options` `{option:"42", interface:<k>, value:<comma-joined>}` | per-interface |
+| `tftp` | `dhcp_boot.servername` (option 66) | per-interface |
+| `filename` | `dhcp_boot.filename` (option 67), `interface:<k>` | per-interface |
+| `nextserver` | `dhcp_boot.address` (siaddr) | per-interface |
+| `defaultleasetime` | `dhcp_ranges.lease_time` | per-range |
+| `maxleasetime` | – | **PARTIAL**: dnsmasq has one lease time per range; the model's nearest field, `dhcp/lease_max`, is a *lease count*. Warning: "max lease time not represented" |
+
+`dhcp_options.option` holds the **numeric IANA code as a string** (the model fills it from
+`iana/dhcpv4-options.csv`; the config template renders `dhcp-option=…,<option>,<value>`). `nextserver`
+without a `filename` cannot use `dhcp_boot` (`filename` is Required) → PARTIAL.
+
+Per-host options (a `staticmap` with its own `dnsserver`/`gateway`/`domain`/`filename`/`nextserver` — the
+`dhcp.xml` fixture's third case): create a `dhcp_tags` row (name `pf2opn_<ifkey>_<mac-slug>`, unique), set
+it via `hosts.set_tag`, and attach the same `dhcp_options`/`dhcp_boot` rows keyed by `tag` instead of
+`interface`. No per-host options → no tag is created.
+
+Warnings (PARTIAL) when non-empty: `failover_peerip` ("dnsmasq HA uses split pools + `dhcp/reply_delay`,
+not a failover peer"), `mac_allow`/`mac_deny` ("per-range MAC ACLs not represented; use tags"),
+`ddnsdomain*` ("RFC 2136 dynamic DNS updates are not supported by dnsmasq"), `numberoptions/item`
+("custom DHCP options not migrated (Tier 2)"), `staticarp`, `ldap`, `rootpath`, `filename32/64/*arm`,
+`uefihttpboot`, `ignoreclientuids`, and `maxleasetime` as above.
+
+**finalize (range translator).**
+
+* REMOVE `opn:dnsmasq/dhcp_ranges[interface='<k>']` for **every** migrated key. This **inverts** the old
+  Kea rule: the base is a fresh 26.7 install whose sample config ships a default LAN `dhcp_ranges` row,
+  so clear the base row for an interface before appending the migrated one (otherwise LAN has two
+  ranges).
+* SET `opn:dnsmasq/enable` = `1`.
+* SET `opn:dnsmasq/dhcp/fqdn` = `1` (register qualified lease names, matching pfSense's
+  `regdhcp`-with-domain behaviour).
+* SET `opn:dnsmasq/interface` = the migrated keys unioned with the base's existing list. OPNsense only
+  registers the DHCP firewall rules for interfaces named here, so this is required for DHCP to answer.
+* **Unbound glue (this replaces D6).** If Unbound is enabled in the output
+  (`OPNsense/unboundplus/general/enabled=1`): if `dnsmasq/port` is empty or equals Unbound's port, SET it
+  to `53053`; then for each distinct migrated DHCP domain D, APPEND `OPNsense/unboundplus/dots/dot`
+  `{enabled:1, type:forward, domain:D, server:"127.0.0.1", port:<dnsmasq port>, forward_tcp_upstream:0,
+  forward_first:0, description:"pf2opn: local DHCP domain via Dnsmasq"}` (skip if an identical forward
+  exists). This is the OPNsense-documented Unbound+Dnsmasq combo and is what makes **dynamic** lease
+  names resolve. Followup: add the matching `in-addr.arpa` reverse forward per subnet.
+* If Unbound is **not** enabled in the output, SET `opn:dnsmasq/port` = `53` (Dnsmasq is the resolver)
+  and emit no forwards.
+* If the base has Kea DHCP enabled, add a warning: dnsmasq will not start while Kea holds the DHCP ports.
+
+**Knock-on: §12.1.13 `regdhcp`/`regdhcpstatic`, and D6.**
+
+With Kea nothing fed DNS, so we synthesized Unbound host overrides. With Dnsmasq it inverts — Dnsmasq
+registers names itself:
+
+* `unbound/regdhcp` → `OPNsense/unboundplus/general/regdhcp` stays **`0`**, with a corrected warning:
+  "Unbound's DHCP registration reads ISC DHCP leases (`/var/dhcpd/var/db/dhcpd.leases`); this box has
+  none. Dnsmasq registers lease names — reach them via the local-domain query-forwarding the DHCP
+  translator writes."
+* `unbound/regdhcpstatic` → same: **`0`**, because Unbound's static registration reads the ISC/Kea
+  `static_mapping` plugin hook, which Dnsmasq does not provide.
+* **D6 is demoted to a fallback, default off.** `dns_static_host` is still discovered, but
+  `default_selected=False` with the note "redundant while Dnsmasq serves DNS for this domain (the
+  default); enable only if Dnsmasq DNS is disabled". In the default path the Dnsmasq `hosts` rows plus
+  the Unbound forward cover both static and dynamic names.
+
+**Open item (confirm before M7 is built).**
+
+A pfSense subnet with `enable` but **no** `range`/`pool` (static reservations only) has no dynamic range.
+Dnsmasq still needs a `dhcp_ranges` row to serve DHCP on that interface (`mode=static`), but `start_addr`
+is Required by the model. The design uses the interface's network address (e.g. `192.168.1.0`). Confirm
+the `RangeAddressField` accepts a network address; if not, use the interface IP instead. Whether any
+migrated subnet actually hits this path is not yet checked — verify it against the real config during M7.
 
 #### 12.1.12 Virtual IPs (`vips.py`, base_policy `merge` by `interface+subnet`, container `virtualip`)
 `pf:virtualip/vip[]` → `opn:virtualip/vip[]`: `mode` (`ipalias`, `carp`, `proxyarp`; `other`
@@ -985,8 +1093,8 @@ as above.
 | `active_interface` | `general/active_interface` | comma list; `all` → empty; each key mapped; `lo0`/`localhost` kept as `lo0`; excluded keys are dropped with a warning |
 | `outgoing_interface` | `general/outgoing_interface` | same |
 | `dnssec` | `general/dnssec` | presence → `1`/`0` |
-| `regdhcp` | `general/regdhcp` | `0` + warning "dynamic lease registration not available with Kea" |
-| `regdhcpstatic` | `general/regdhcpstatic` | `0` (replaced by the `dns_static_host` items, D6) |
+| `regdhcp` | `general/regdhcp` | `0` + warning "Unbound's DHCP registration reads ISC leases, which this box has none of; Dnsmasq registers the lease names — reach them via the local-domain query-forwarding the DHCP translator writes (§12.1.11)" |
+| `regdhcpstatic` | `general/regdhcpstatic` | `0` (the static maps live in Dnsmasq `hosts` and are served by Dnsmasq's own DNS; the old synthesis, D6, is now a fallback — §12.1.11) |
 | `system_domain_local_zone_type` | `general/local_zone_type` | copy (`transparent` default) |
 | `hideidentity`,`hideversion`,`dnssecstripped`,`prefetch`,`prefetchkey`,`qname-minimisation-strict`→`qnameminstrict`,`serveexpired` | `advanced/<same>` | presence → `1`/`0` |
 | `msgcachesize`,`outgoing_num_tcp`→`outgoingnumtcp`,`incoming_num_tcp`→`incomingnumtcp`,`cache_max_ttl`→`cachemaxttl`,`cache_min_ttl`→`cacheminttl` | `advanced/…` | copy if non-empty |
@@ -1012,12 +1120,15 @@ hostname+domain).
 `opn:OPNsense/unboundplus/aliases/alias`: `enabled=1`, `host`=uuid of the first host,
 `hostname`←`host`, `domain`←`domain`, `description`←`description`.
 
-**Static-map hosts** (`dnsstatic:<k>:<mac>`, translator `dns_static_host`): only discovered
-when pfSense `unbound/regdhcpstatic` is present. One per DHCP staticmap with a non-empty
-`hostname` and `ipaddr`. Domain = staticmap `domain`, else the dhcpd interface `domain`, else
-`system/domain`. Deps: `dhcpres:<k>:<mac>`. If a `dns_host` item with the same host+domain
-exists → UNSUPPORTED "duplicate of explicit host override". Render: like a host override
-with description `"from DHCP static map"`.
+**Static-map hosts** (`dnsstatic:<k>:<mac>`, translator `dns_static_host`) — **fallback, D6**.
+Discovered when pfSense `unbound/regdhcpstatic` is present *or* any staticmap carries a hostname, but with
+`default_selected=False`: with Dnsmasq as the DHCP backend the names are already served by Dnsmasq's own
+DNS and reachable via the local-domain query-forward (§12.1.11), so this only matters if Dnsmasq DNS is
+disabled. One per DHCP staticmap with a non-empty `hostname` and `ipaddr`. Domain = staticmap `domain`,
+else the dhcpd interface `domain`, else `system/domain`. Deps: `dhcpres:<k>:<mac>`. If a `dns_host` item
+with the same host+domain exists → UNSUPPORTED "duplicate of explicit host override". Render: like a host
+override with description `"from DHCP static map"` plus warning "fallback path: enable only if Dnsmasq
+DNS is disabled".
 
 **Domain overrides** (`dnsdom:<domain>`, translator `dns_domain`). `pf:unbound/domainoverrides[]` →
 APPEND `opn:OPNsense/unboundplus/dots/dot`: `enabled=1`, `type=forward`, `domain`, `server`
@@ -1198,13 +1309,17 @@ Edge case: a pf VLAN whose parent NIC is unmapped → its vlanif has no device �
 iface is UNSUPPORTED.
 
 ### 12.3 Tier 2 (later milestones; discover as UNSUPPORTED "planned (Tier 2)" in v1)
-DHCPv6 and router advertisements (Kea dhcp6 + `OPNsense/Radvd`). Dnsmasq as an alternative
-DHCP backend (`--dhcp-backend dnsmasq`). DHCP custom options (`numberoptions` → `Kea/dhcp4/options`).
-NPt (`nat/npt` → `Filter/npt`). Gateway groups (`/gateways/gateway_group+`). Firewall
-schedules. Interface groups (`ifgroups`). Tunables (`sysctl/item[]`). SNMP (`os-net-snmp`).
-UPnP/miniupnpd (`os-upnp`). UDP broadcast relay (`os-udpbroadcastrelay`). Avahi
-(`os-mdns-repeater`). Filter separators → categories. OpenVPN instances. IPsec tunnels
-(Swanctl). LAGG/bridge/PPPoE/GIF/GRE devices. Static ARP.
+DHCPv6 and router advertisements (Dnsmasq DHCPv6 + `OPNsense/Radvd`). DHCP custom options
+(`numberoptions` → `dnsmasq/dhcp_options`). NPt (`nat/npt` → `Filter/npt`). Gateway groups
+(`/gateways/gateway_group+`). Firewall schedules. Interface groups (`ifgroups`). Tunables
+(`sysctl/item[]`). SNMP (`os-net-snmp`). UPnP/miniupnpd (`os-upnp`) and the UDP broadcast relay
+(`os-udpbroadcastrelay`) — both **stay Tier 2 for now** (Q6). Filter separators → categories. OpenVPN
+instances. IPsec tunnels (Swanctl). LAGG/bridge/PPPoE/GIF/GRE devices. Static ARP.
+
+mDNS/Avahi (`os-mdns-repeater`) has moved out of Tier 2: it is spec'd as **M15** (§17). Kea remains the
+only plausible *alternative* DHCP backend — it is the right tool only for HA lease-sync or thousands of
+leases — but it is **not** used here (D5). If it is ever added, it slots in as a second backend behind the
+same `dhcp:<ifkey>` items.
 
 ### 12.4 Unsupported catalogue (`unsupported.py`; each is one item, always UNSUPPORTED)
 Emit an item only if the section/package is present **and non-empty** (an element with
@@ -1227,7 +1342,7 @@ children or text).
 | `unsup:freeradius` | `installedpackages/freeradius*` | "install os-freeradius and reconfigure; client secrets not migrated" |
 | `unsup:frr` | `installedpackages/frr*` | "install os-frr 2.x and rebuild BGP config" |
 | `unsup:tailscale` | `installedpackages/tailscale*` | "install os-tailscale and re-authenticate" |
-| `unsup:avahi` | `installedpackages/avahi` | "install os-mdns-repeater (Tier 2 candidate)" |
+| `unsup:avahi` | `installedpackages/avahi` | "install os-mdns-repeater; migrated as M15 (§17)" |
 | `unsup:shellcmd` | `installedpackages/shellcmdsettings` or `system/earlyshellcmd`/`shellcmd` | "use /usr/local/etc/rc.syshook.d/ scripts" |
 | `unsup:servicewatchdog` | `installedpackages/servicewatchdog` | "use Monit" |
 | `unsup:openvpn_export` | `installedpackages/vpn_openvpn_export` | "built into OPNsense OpenVPN" |
@@ -1236,7 +1351,7 @@ children or text).
 | `unsup:openvpn` | `openvpn/openvpn-server` or `openvpn-client` | "OpenVPN not migrated in v1 (Tier 2)" |
 | `unsup:shaper` | `shaper/queue` or `dnshaper/queue` | "traffic shaper models differ; rebuild" |
 | `unsup:snmpd` | `snmpd` has any of `syslocation`, `syscontact`, `rocommunity`, `enable` (the real config has no `<enable>` — the old detector required it and would have missed the section) | "install os-net-snmp (Tier 2); community string not shown" |
-| `unsup:dhcpdv6` | `dhcpdv6/*/enable` | "Tier 2: Kea DHCPv6 / router advertisements" |
+| `unsup:dhcpdv6` | `dhcpdv6/*/enable` | "Tier 2: Dnsmasq DHCPv6 / router advertisements" |
 | `unsup:sysctl` | `sysctl/item` | "Tier 2: review tunables manually (System ▸ Settings ▸ Tunables)" |
 | `unsup:ifgroups` | `ifgroups/ifgroupentry` | "Tier 2; package-created groups (WireGuard/Tailscale) aren't needed" |
 | `unsup:sshdata` | `sshdata` | "SSH host keys not migrated; OPNsense generates new ones" |
@@ -1276,7 +1391,10 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    `gateway` is an output gateway name.
 6. **Gateways**: names unique; `interface` exists in output interfaces.
 7. **Static routes**: `gateway` exists.
-8. **Kea**: each reservation's `subnet` uuid exists; reservation IPs unique; pool ranges inside the subnet.
+8. **Dnsmasq DHCP**: every migrated `dhcp_ranges.interface` is an output interface key; reservation IPs are
+   unique and inside their interface subnet; every `hosts.set_tag` / `dhcp_options.tag` / `dhcp_boot.tag`
+   references an existing `dhcp_tags` row; every emitted `dhcp_options` row has `type=set` (we never emit
+   `match`).
 9. **WireGuard**: each server `peers` uuid exists in clients; instances unique; names unique.
 10. **Unbound**: each alias `host` uuid exists.
 11. **Aliases**: names unique; nested alias entries exist.
@@ -1423,9 +1541,9 @@ Pilot tests: the mapping screen blocks on an unmapped NIC; space toggles; the de
 cascade notification; review shows errors; `w` writes the file.
 
 ### 16.6 Manual acceptance (M14, Dave)
-Run against `local/config-gateway…xml` (never committed) with Dave's real base export.
-Import the output into a throwaway OPNsense 26.7 VM and confirm that the Firewall ▸ Rules,
-NAT, Kea, Unbound, and WireGuard pages load without validation errors.
+Run against `local/config-gateway…xml` (never committed) with Dave's real base export. Import the output
+into a throwaway OPNsense 26.7 VM on the **import-test host `cf99p03`** (Q3, §18) and confirm that the
+Firewall ▸ Rules, NAT, **Dnsmasq DHCP**, Unbound, and WireGuard pages load without validation errors.
 
 ---
 
@@ -1468,14 +1586,18 @@ becomes a PARTIAL warning.
 **M6 — NAT** (§12.1.8–10, §13 item 5 for NAT)
 Accept: goldens; the associated filter rule is auto-selected via deps; `nat/outbound/mode` is set.
 
-**M7 — Kea DHCPv4** (§12.1.11, §13 item 8)
-Accept: goldens; Dnsmasq ranges for migrated interfaces are removed and Dnsmasq is disabled
-when none remain; subnet ids start after the base max.
+**M7 — Dnsmasq DHCPv4** (§12.1.11, §13 item 8)
+Accept: goldens; each migrated interface gets its `dhcp_ranges` rows and the base's default range for
+that interface is **replaced, not duplicated**; `dnsmasq/enable=1`, `dhcp/fqdn=1` and the interface list
+are set; static maps render as `hosts` rows with lower-cased MACs and reservations keep their IPs;
+`denyunknown` → `mode=static`; per-interface options land as `dhcp_options`/`dhcp_boot` rows; the Unbound
+query-forward to Dnsmasq is emitted and `dnsmasq/port` is not left colliding with Unbound's.
 
 **M8 — Unbound** (§12.1.13, §13 item 10)
-Accept: goldens incl. DoT upstreams with `verify` hostnames, static-map host synthesis,
-duplicate suppression, and the ACL action mapping; the repeated-`<hosts>`/`<acls>` fixtures are
-parsed as N entries (not one).
+Accept: goldens incl. DoT upstreams with `verify` hostnames, the ACL action mapping, and `regdhcp`/
+`regdhcpstatic` forced to `0` with the new warnings; the fallback `dns_static_host` items are discovered
+but `default_selected=False` and de-dup against an explicit host override; the repeated-`<hosts>`/
+`<acls>` fixtures are parsed as N entries (not one).
 
 **M9 — Trust, users, groups** (§12.1.14–15)
 Accept: goldens; chain trimming; uid collision handling; `system:root_password` only applies when selected.
@@ -1498,35 +1620,74 @@ Accept: a pilot test writes the output; the saved selection JSON reproduces the 
 output through `migrate --selection` (byte-compare excluding `revision/time`).
 
 **M14 — Hardening and real-config acceptance** (§13 full, §16.4, §16.6)
-All validation checks, the secret-leak test, and README usage. Dave runs it against the real
-config and imports the result into a VM. Fix whatever the import reveals (file follow-up issues).
+All validation checks, the secret-leak test, and README usage. Dave runs it against the real config and
+imports the result into a throwaway OPNsense 26.7 VM on **cf99p03** (the import-test host, Q3). Fix
+whatever the import reveals (file follow-up issues).
+
+**M15 — mDNS reflector / Avahi (stub)** (§12.3; `unsup:avahi` in §12.4)
+Needed soon (Q6). pfSense `installedpackages/avahi` → OPNsense `os-mdns-repeater` (plugin model
+`//OPNsense/MDNSRepeater`, **v1.0.1**). Mapping sketch: `enabled` ← avahi enable; `interfaces` ← the
+pfSense reflect-interface list, mapped keys, comma-joined (`InterfaceField Multiple`); `enablecarp` = `0`;
+`blocklist` empty. **Open item:** the exact pfSense `avahi` field names are not yet verified against the
+package — confirm them before building (the OPNsense target fields *are* verified against the plugin
+model). UPnP (`os-upnp`) and the UDP broadcast relay (`os-udpbroadcastrelay`) **stay Tier 2 for now**, not
+folded into M15.
 
 ---
 
-## 18. Open questions for Dave (answer before M7 / M14)
+## 18. Decisions record — Dave's answers (2026-11-03)
+
+The seven questions below were answered by Dave on **2026-11-03**. The question text and the reasoning
+behind each are kept for context; every entry now carries the answer and its consequence. Where an answer
+changed a decision, the affected section and the decision table (§3) were revised in place rather than
+restated here.
 
 * **Q1 DHCP backend**: Kea (recommended, D5) or Dnsmasq? You rely on pfSense
   `regdhcp`/`regdhcpstatic`. With Kea, static maps become Unbound host overrides (D6), but
   *dynamic* lease names stop resolving. Dnsmasq would keep dynamic names but maps less cleanly.
+  **→ Dnsmasq.** Consequence: §12.1.11 was rewritten from Kea to Dnsmasq (`dhcp_dnsmasq.py`); D5/D6
+  revised (§3); the Unbound `regdhcp`/`regdhcpstatic` handling and the D6 fallback updated (§12.1.13).
+  Dnsmasq registers dynamic *and* static lease names itself, so both resolve — via the
+  Unbound→Dnsmasq local-domain query-forward the DHCP translator now emits. Kea is no longer "the
+  alternative"; it is at most a future backend for HA/scalability (§12.3).
 * **Q2 Base config**: OK to require `--base`, meaning a fresh 26.7 install on the new box with
   WAN/LAN assigned at the console and its config exported first? (The alternative is a bundled
   minimal base with no real NIC names, which I advise against.)
+  **→ Confirmed — `--base` is required.** Consequence: none; D2 stands unchanged.
 * **Q3 VM acceptance**: is there a Proxmox host where a throwaway OPNsense 26.7 VM can be used
   for the M14 import test?
+  **→ Use `cf99p03`.** Consequence: M14 and §16.6 name `cf99p03` as the import-test host.
+  Reachability (checked 2026-11-03): `cf99p03` resolves on the LAN as `cf99p03.home.asmartass.me` →
+  `192.168.100.202`, a node of the 5-node `cf99` Proxmox cluster (`cf99p01`–`cf99p05`,
+  `192.168.100.200`–`.204`); it answers ICMP. Cluster nodes have no direct SSH from here, so the
+  throwaway VM is created/imported through Proxmox (web UI) rather than an SSH session.
 * **Q4 Policy-routing VPNs**: ProtonVPN (`tun_wg0`) is used for policy routing, and the server
   tunnel `tun_wg1` has peers with `0.0.0.0/0` and remote subnets (`192.168.8.0/24`). My rule turns
   routes off for any tunnel with a default-route peer and warns about the remote subnets. Of the 10
   peers, 6 map cleanly, 3 are PARTIAL (no inferable tunnel address / extra remote nets), 1 is
   UNSUPPORTED (unassigned Mullvad peer). OK, or do you want per-peer handling (for example keep
   routes on for `tun_wg0` and add explicit routes for `192.168.8.0/24`)?
+  **→ Accepted as-is: 6 OK / 3 PARTIAL / 1 UNSUPPORTED.** Consequence: §12.1.17 is unchanged; those
+  peers keep their warnings + followups.
 * **Q5 Admin password**: should `system:root_password` (copy pfSense admin hash to OPNsense
   root) default to off as designed?
+  **→ Confirmed — default off.** Consequence: none; §12.1.1 stands (the item exists but is not selected
+  by default).
 * **Q6 Scope**: are the Tier 2 items you actually need soon UPnP, the UDP broadcast relay, and
   mDNS (Avahi)? If so, I'd spec them next as M15–M17.
+  **→ mDNS/Avahi is the one needed soon.** Consequence: Avahi (`os-mdns-repeater`) is spec'd as **M15**
+  (§17) — a lightweight stub, since it is small. UPnP (`os-upnp`) and the UDP broadcast relay
+  (`os-udpbroadcastrelay`) **stay Tier 2 for now** (§12.3); no M16/M17 is spec'd.
 * **Q7 Floating "any" rules**: for a floating rule with `interface` `any`, I write an empty
   `interface` value (matching how the GUI shows "all"). If OPNsense's import rejects an empty
   interface, the fallback is to expand to the comma-joined list of every included interface key
   (M5 acceptance covers both paths). Confirm you're happy with the empty-value default.
+  **→ Confirmed — empty `interface` by default, keep the expand-to-all fallback.** Consequence: §12.1.7
+  (filter `interface` row) stands; M5 keeps testing both paths.
+
+Open items carried forward from these answers: **Q3** — the `cf99p03` VM provisioning path (web UI);
+**Q6/M15** — verify the pfSense `avahi` field names against the package; and the static-only-subnet
+`start_addr` question noted at the end of §12.1.11.
 
 ---
 
@@ -1579,3 +1740,28 @@ avahi, telegraf, ntopng, bandwidthd, miniupnpd, traffictotals, acme, servicewatc
 udpbroadcastrelay, pimd*, freeradiuseapconf, vpn_openvpn_export), `virtualip` (1, DNSBL), `dyndnses` (3),
 `l2tp` (server), `ovpnserver` (wizard leftovers), `captiveportal` (1 zone), `traffic_graphs`, `ifgroups`,
 `dhcpbackend` (`isc`), `sysctl` (1), `sshdata` (host keys — never migrated).
+
+### 2026-11-03 — DHCP backend re-verified after Q1 (Kea → Dnsmasq)
+
+Dave chose **Dnsmasq** over Kea (Q1). Before rewriting §12.1.11 I re-read the Dnsmasq model and its
+config generation against `26.7.8` rather than from memory:
+
+* `Dnsmasq/Dnsmasq.xml` (**v1.0.9**) — the containers and fields cited in §12.1.11 (`dhcp_ranges` with
+  `interface`/`start_addr`/`end_addr`/`mode`/`lease_time`/`domain`/`domain_type`; `hosts` with
+  `host`/`domain`/`ip`/`hwaddr`/`client_id`/`set_tag`/`descr`; `dhcp_tags`; `dhcp_options`; `dhcp_boot`)
+  are verbatim from it, together with `Dnsmasq.php` (`getDhcpInterfaces()`, the `static`-range rule, and
+  the single-IPv4-per-reservation rule) and `scripts/dnsmasq/dnsmasq_dhcp_options.py` (option values are
+  numeric IANA codes, stored as strings).
+* `service/templates/OPNsense/Dnsmasq/dnsmasq.conf` — shows how `dhcp_ranges` become `dhcp-range=`, how
+  `hosts` become `dhcp-host=`, and that DHCP options/boot are tag-scoped (interface tag is automatic).
+* `etc/inc/plugins.inc.d/dnsmasq.inc` + `unbound.inc`, `scripts/dnsmasq/dnsmasq_watcher.py`,
+  `scripts/unbound/unbound_watcher.py` — confirm `regdhcp`/`regdhcpstatic` read **ISC** leases / the
+  `static_mapping` plugin hook (which Dnsmasq does not provide), i.e. the §12.1.13 knock-on.
+* `etc/config.xml.sample` — the default LAN `dhcp_ranges` row and `dnsmasq/port=53053` (the reason M7 must
+  *replace*, not duplicate, the base range).
+* `docs.opnsense.org/manual/dnsmasq.html` — the documented Unbound+Dnsmasq combination (Unbound forwards
+  the local domain to Dnsmasq on a non-standard port), which is what the DHCP finalize now emits.
+* For the new M15 stub: `opnsense/plugins` `net/mdns-repeater` model (`//OPNsense/MDNSRepeater`, v1.0.1).
+
+The ten corrections in the list above still stand; the DHCP correction is the Kea→Dnsmasq change captured
+in §12.1.11, §3 (D5/D6), §12.1.13 and §17 (M7). The session's own input config was **not** touched.
