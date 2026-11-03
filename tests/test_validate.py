@@ -454,6 +454,39 @@ def test_nat_port_forward_address_endpoint_matching_family_is_ok(minimal_plan) -
     assert _errors(validate(out, plan)) == []
 
 
+def test_nat_port_forward_address_endpoint_unknown_token_is_an_error(minimal_plan) -> None:
+    """§13 check 5: a DNat ``<address>`` endpoint is reference-checked, not skipped.
+
+    Reading ``source/network``/``destination/network`` alone silently skips every
+    single-host/alias endpoint, which renders as ``<address>`` (mirrors check 13).
+    """
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><lan><if>igc1</if></lan></interfaces>"
+        "<nat><rule><sequence>10</sequence>"
+        "<source><network>any</network></source>"
+        "<destination><address>GHOST</address></destination>"
+        "<target>192.168.1.10</target></rule></nat></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        "destination/address" in f.message and "GHOST" in f.message for f in errors
+    )
+
+
+def test_nat_port_forward_address_endpoint_known_token_passes(minimal_plan) -> None:
+    """§13 check 5: a valid ``<address>`` endpoint (here an interface key) is ok."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><lan><if>igc1</if></lan></interfaces>"
+        "<nat><rule><sequence>10</sequence>"
+        "<source><network>any</network></source>"
+        "<destination><address>lan</address></destination>"
+        "<target>192.168.1.10</target></rule></nat></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
 def test_onetoone_is_a_check_13_no_op(minimal_plan) -> None:
     """§13 check 13: the 1:1 model has no ``ipprotocol``; it must not be checked."""
     _src, plan = minimal_plan

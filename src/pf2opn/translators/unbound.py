@@ -71,6 +71,42 @@ def _is_ipv6(value: str) -> bool:
         return False
 
 
+def _self_interface_addresses(
+    src: SourceContext,
+) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """The source box's own interface addresses (§12.1.13 loopback/self skip)."""
+    addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    for iface in src.pf_ifaces.values():
+        for raw in (iface.ipaddr, iface.ipaddrv6):
+            raw = (raw or "").strip()
+            if not raw:
+                continue
+            try:
+                addresses.add(ipaddress.ip_address(raw))
+            except ValueError:
+                continue
+    return addresses
+
+
+def _is_loopback_or_self(
+    value: str, self_addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address]
+) -> bool:
+    """True for a loopback/unspecified upstream or one of the box's own IPs.
+
+    pfSense lists its own resolver (`127.0.0.1` and/or an interface IP) among
+    ``system/dnsserver`` because it runs Unbound itself; rendering that as an
+    OPNsense upstream points at nothing that listens (§12.1.13).
+    """
+    value = (value or "").strip()
+    if not value:
+        return False
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified or address in self_addresses
+
+
 def _map_interface_list(raw: str, ifmap: IfaceMap) -> tuple[str, list[str]]:
     """Map a pfSense Unbound interface list; returns (value, dropped keys)."""
     value = (raw or "").strip()
@@ -152,6 +188,22 @@ class DnsGeneral(Translator):
         ):
             warnings.append("DNS-over-TLS listener not migrated")
 
+        if unbound.find("forwarding") is not None:
+            servers = pf_list(src.pf, "system/dnsserver")
+            self_addresses = _self_interface_addresses(src)
+            skipped = [
+                server for server in servers if _is_loopback_or_self(server, self_addresses)
+            ]
+            if skipped:
+                warnings.append(
+                    f"{len(skipped)} loopback/self Unbound upstream(s) skipped"
+                )
+            if servers and len(skipped) == len(servers):
+                followups.append(
+                    "all Unbound upstreams are loopback/self; set the real upstream "
+                    "by hand under Services \u25b8 Unbound \u25b8 Query Forwarding / DNS-over-TLS"
+                )
+
         return [
             Item(
                 "dns:general",
@@ -216,9 +268,13 @@ class DnsGeneral(Translator):
                 placements.append(Placement(f"{base}/advanced/{opn_tag}", Mode.SET, text=value))
 
         if unbound.find("forwarding") is not None:
+            servers = pf_list(ctx.src.pf, "system/dnsserver")
+            self_addresses = _self_interface_addresses(ctx.src)
             if unbound.find("forward_tls_upstream") is not None:
                 placements.append(Placement(f"{base}/forwarding/enabled", Mode.SET, text="0"))
-                for index, server in enumerate(pf_list(ctx.src.pf, "system/dnsserver")):
+                for index, server in enumerate(servers):
+                    if _is_loopback_or_self(server, self_addresses):
+                        continue
                     placements.append(
                         Placement(
                             f"{base}/dots",
@@ -228,7 +284,16 @@ class DnsGeneral(Translator):
                         )
                     )
             else:
-                placements.append(Placement(f"{base}/forwarding/enabled", Mode.SET, text="1"))
+                # A plain forward to a loopback/self address points at nothing;
+                # when every upstream is skipped, leave forwarding off so Unbound
+                # falls back to recursive resolution (§12.1.13).
+                enabled = (
+                    "0"
+                    if servers
+                    and all(_is_loopback_or_self(server, self_addresses) for server in servers)
+                    else "1"
+                )
+                placements.append(Placement(f"{base}/forwarding/enabled", Mode.SET, text=enabled))
         return placements
 
 
@@ -484,9 +549,30 @@ class DnsDomain(Translator):
         if unbound is None:
             return []
         items: list[Item] = []
+        self_addresses = _self_interface_addresses(src)
         for index, override in enumerate(unbound.findall("domainoverrides")):
             domain = pf_text(override, "domain")
             if not domain:
+                continue
+            server, _, _port = pf_text(override, "ip").partition("@")
+            if _is_loopback_or_self(server, self_addresses):
+                # Skipped like a loopback/self system upstream (§12.1.13); it
+                # emits no dot, so it is a note rather than a migrated object.
+                items.append(
+                    Item(
+                        f"dnsdom:{domain}",
+                        self.section,
+                        domain,
+                        override,
+                        Status.PARTIAL,
+                        warnings=[
+                            f"loopback/self target {server} skipped; set the real "
+                            "upstream by hand under Services \u25b8 Unbound "
+                            "\u25b8 Query Forwarding"
+                        ],
+                        emits=False,
+                    )
+                )
                 continue
             items.append(
                 Item(
@@ -505,6 +591,8 @@ class DnsDomain(Translator):
             return []
         ip = pf_text(override, "ip")
         server, _, port = ip.partition("@")
+        if _is_loopback_or_self(server, _self_interface_addresses(ctx.src)):
+            return []
         tls_hostname = pf_text(override, "tls_hostname")
         dot = E("dot", uuid=ctx.uuid(item.id))
         sub(dot, "enabled", "1")

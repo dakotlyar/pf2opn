@@ -83,12 +83,14 @@ def render_report(
         )
     lines.append("")
 
-    # 4. Migrated
+    # 4. Migrated — emitted objects only; settings/classifier notes go to 4b (§14)
     lines.append("## Migrated")
     lines.append("")
     for section in order:
         items = _items_for(plan, section, Status.UNSUPPORTED, invert=True)
-        selected = [item for item in items if item.id in plan.selected]
+        selected = [
+            item for item in items if item.id in plan.selected and item.emits
+        ]
         if not selected:
             continue
         lines.append(f"### {titles.get(section, section)}")
@@ -96,6 +98,26 @@ def render_report(
             lines.append(f"- {item.label}")
             for warning in item.warnings:
                 lines.append(f"  - {warning}")
+        lines.append("")
+
+    # 4b. Settings & notes — selected items that emit no config object (§14)
+    lines.append("## Settings & notes")
+    lines.append("")
+    any_notes = False
+    for section in order:
+        items = _items_for(plan, section, Status.UNSUPPORTED, invert=True)
+        notes = [item for item in items if not item.emits and item.id in plan.selected]
+        if not notes:
+            continue
+        any_notes = True
+        lines.append(f"### {titles.get(section, section)}")
+        for item in notes:
+            lines.append(f"- {item.label}")
+            for warning in item.warnings:
+                lines.append(f"  - {warning}")
+        lines.append("")
+    if not any_notes:
+        lines.append("- (none)")
         lines.append("")
 
     # 5. Skipped by user
@@ -198,6 +220,10 @@ def _section_counts(plan: Plan) -> tuple[list[str], dict]:
             order.append(item.section)
         if item.status == Status.UNSUPPORTED:
             counts[item.section][2] += 1
+        elif not item.emits:
+            # §14: non-emitting items are neither migrated nor skipped-by-user;
+            # they are listed under "Settings & notes".
+            continue
         elif item.id in plan.selected:
             counts[item.section][0] += 1
         else:

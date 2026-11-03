@@ -82,6 +82,91 @@ def test_regdhcp_flags_are_zero_in_output(unbound_plan) -> None:
     assert out.findtext("OPNsense/unboundplus/general/regdhcpstatic") == "0"
 
 
+def _forwarding_plan(tmp_path, servers, *, tls):
+    """A minimal source with Unbound forwarding and the given system nameservers."""
+    path = tmp_path / "forwarding.xml"
+    nameservers = "".join(f"<dnsserver>{server}</dnsserver>" for server in servers)
+    path.write_text(
+        "<pfsense><version>24.0</version>"
+        "<system><hostname>x</hostname><domain>example.test</domain>"
+        f"{nameservers}</system>"
+        "<interfaces><lan><if>em1</if><descr>LAN</descr><enable></enable>"
+        "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
+        "<unbound><enable></enable><forwarding></forwarding>"
+        + ("<forward_tls_upstream></forward_tls_upstream>" if tls else "")
+        + "</unbound></pfsense>",
+        encoding="utf-8",
+    )
+    src = SourceContext.load(path, _BASE)
+    return src, build_plan(src, default_ifmap(src, {"em1": "igc1"}))
+
+
+def _forwarding_placements(src, plan):
+    ctx = WriteContext(src, plan)
+    item = plan.by_id["dns:general"]
+    return item, registry.get("dns_general").render(item, ctx)
+
+
+def test_loopback_dot_upstream_is_skipped(tmp_path) -> None:
+    """§12.1.13: a loopback ``system/dnsserver`` must not become a DoT upstream."""
+    src, plan = _forwarding_plan(tmp_path, ["127.0.0.1", "8.8.8.8"], tls=True)
+    item, placements = _forwarding_placements(src, plan)
+    dots = [p.element for p in placements if p.path.endswith("/dots")]
+    assert [dot.findtext("server") for dot in dots] == ["8.8.8.8"]
+    enabled = {p.path: p.text for p in placements}
+    assert enabled["OPNsense/unboundplus/forwarding/enabled"] == "0"
+    assert "1 loopback/self Unbound upstream(s) skipped" in item.warnings
+    assert not any("set the real upstream" in followup for followup in item.followups)
+
+
+def test_all_loopback_dot_upstreams_disable_forwarding(tmp_path) -> None:
+    """§12.1.13: with every upstream loopback/self, no dot list and a followup."""
+    src, plan = _forwarding_plan(tmp_path, ["127.0.0.1", "192.168.1.1"], tls=True)
+    item, placements = _forwarding_placements(src, plan)
+    assert [p for p in placements if p.path.endswith("/dots")] == []
+    enabled = {p.path: p.text for p in placements}
+    assert enabled["OPNsense/unboundplus/forwarding/enabled"] == "0"
+    assert "2 loopback/self Unbound upstream(s) skipped" in item.warnings
+    assert any("set the real upstream by hand" in f for f in item.followups)
+
+
+def test_plain_forwarding_all_loopback_is_disabled(tmp_path) -> None:
+    """§12.1.13: the plain ``forwarding/enabled`` path skips self upstreams too."""
+    src, plan = _forwarding_plan(tmp_path, ["127.0.0.1"], tls=False)
+    item, placements = _forwarding_placements(src, plan)
+    enabled = {p.path: p.text for p in placements}
+    assert enabled["OPNsense/unboundplus/forwarding/enabled"] == "0"
+    assert any("set the real upstream by hand" in f for f in item.followups)
+
+
+def test_plain_forwarding_real_upstream_stays_enabled(tmp_path) -> None:
+    src, plan = _forwarding_plan(tmp_path, ["8.8.8.8"], tls=False)
+    _item, placements = _forwarding_placements(src, plan)
+    enabled = {p.path: p.text for p in placements}
+    assert enabled["OPNsense/unboundplus/forwarding/enabled"] == "1"
+
+
+def test_loopback_domain_override_is_skipped(tmp_path) -> None:
+    """§12.1.13: a loopback/self ``domainoverrides`` target emits no dot."""
+    path = tmp_path / "domain.xml"
+    path.write_text(
+        "<pfsense><version>24.0</version>"
+        "<system><hostname>x</hostname><domain>example.test</domain></system>"
+        "<interfaces><lan><if>em1</if><descr>LAN</descr><enable></enable>"
+        "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
+        "<unbound><enable></enable>"
+        "<domainoverrides><domain>corp.example.test</domain><ip>127.0.0.1</ip>"
+        "</domainoverrides></unbound></pfsense>",
+        encoding="utf-8",
+    )
+    src = SourceContext.load(path, _BASE)
+    plan = build_plan(src, default_ifmap(src, {"em1": "igc1"}))
+    item = plan.by_id["dnsdom:corp.example.test"]
+    assert item.emits is False
+    ctx = WriteContext(src, plan)
+    assert registry.get("dns_domain").render(item, ctx) == []
+
+
 # --------------------------------------------------------------------------- #
 # Host overrides (§12.1.13 dns_host)
 # --------------------------------------------------------------------------- #

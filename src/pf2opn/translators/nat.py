@@ -265,6 +265,7 @@ class NatOutbound(Translator):
                 outbound,
                 Status.PARTIAL if mode_warnings else Status.OK,
                 warnings=mode_warnings,
+                emits=False,
                 data={"raw_mode": raw_mode, "mode": mapped_mode},
             )
         ]

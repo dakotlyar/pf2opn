@@ -428,15 +428,19 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
         _check_interface_tokens(
             (rule.findtext("interface") or "").strip(), iface_keys, findings, path, ident
         )
-        _check_net_fields(
-            rule,
-            ("source/network", "destination/network", "target"),
-            iface_keys,
-            aliases,
-            findings,
-            path,
-            ident,
-        )
+        # The DNat endpoint stores its address in either ``network`` or the
+        # volatile ``address``; read the endpoint elements themselves so an
+        # ``<address>`` endpoint is validated too (§13 check 5 / §12.1.8).
+        for field, value in _nat_endpoint_addresses(rule):
+            for token in (part.strip() for part in value.split(",")):
+                if token and not _net_token_ok(token, iface_keys, aliases):
+                    findings.append(
+                        Finding(
+                            "error",
+                            f"{ident}: {field} references unknown token {token}",
+                            path,
+                        )
+                    )
         _check_port_fields(
             rule,
             ("source/port", "destination/port", "local-port"),

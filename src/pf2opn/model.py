@@ -28,6 +28,7 @@ class Item:
     followups: list[str] = field(default_factory=list)
     requires_plugin: str | None = None
     readonly_selection: bool = False
+    emits: bool = True  # False for note/settings items that emit no config object (§14)
     data: dict = field(default_factory=dict)
 
 

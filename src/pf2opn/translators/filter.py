@@ -128,6 +128,7 @@ class FilterTranslator(Translator):
                     None,
                     Status.PARTIAL,
                     warnings=[note],
+                    emits=False,
                 )
             )
         return items
