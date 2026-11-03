@@ -6,7 +6,7 @@
       <ipprotocol>inet</ipprotocol>
       <protocol>tcp</protocol>
       <source>
-        <any/>
+        <network>any</network>
       </source>
       <destination>
         <network>wanip</network>
@@ -24,7 +24,7 @@
       <ipprotocol>inet</ipprotocol>
       <protocol>tcp</protocol>
       <source>
-        <any/>
+        <network>any</network>
       </source>
       <destination>
         <network>lanip</network>
@@ -42,7 +42,7 @@
       <ipprotocol>inet</ipprotocol>
       <protocol>udp</protocol>
       <source>
-        <any/>
+        <network>any</network>
       </source>
       <destination>
         <network>wanip</network>

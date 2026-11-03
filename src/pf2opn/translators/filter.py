@@ -65,7 +65,6 @@ _COPY_IF_SET = (
     "max",
     "max-src-conn-rate",
     "max-src-conn-rates",
-    "overload",
     "adaptivestart",
     "adaptiveend",
     "prio",
@@ -188,6 +187,11 @@ class FilterTranslator(Translator):
             if isinstance(child.tag, str) and child.tag.startswith("vlanprio")
         ):
             warnings.append("VLAN priority matching dropped")
+        if pf_text(rule, "category"):
+            warnings.append(
+                "rule categories not migrated; recreate them under "
+                "Firewall \u25b8 Rules \u25b8 Categories if needed"
+            )
 
         default_selected = not (
             descr.endswith(" auto rule")
@@ -206,6 +210,14 @@ class FilterTranslator(Translator):
         gateway = pf_text(rule, "gateway")
         if gateway:
             deps.add(f"gw:{gateway}")
+        overload = pf_text(rule, "overload")
+        if overload:
+            if overload in src.alias_names:
+                deps.add(f"alias:{overload}")
+            else:
+                warnings.append(
+                    "overload alias not migrated; the overload setting is dropped"
+                )
 
         return Item(
             item_id,
@@ -275,10 +287,25 @@ class FilterTranslator(Translator):
             value = pf_text(rule, tag)
             if value:
                 sub(root, tag, value)
+        # `overload` is a uuid ModelRelationField into Firewall/Alias: write the
+        # migrated alias's deterministic uuid, or drop it with a warning when the
+        # alias isn't in the output (§12.1.7).
+        overload = pf_text(rule, "overload")
+        if overload:
+            dep = f"alias:{overload}"
+            if dep in ctx.plan.selected:
+                sub(root, "overload", ctx.uuid(dep))
+            else:
+                warning = (
+                    "overload alias not migrated; the overload setting is dropped"
+                )
+                if warning not in item.warnings:
+                    item.warnings.append(warning)
+                    if item.status == Status.OK:
+                        item.status = Status.PARTIAL
         sub(root, "tcpflags_any", opn_bool(rule.find("tcpflags_any") is not None))
-        category = pf_text(rule, "category")
-        if category:
-            sub(root, "categories", category)
+        # `categories` is a uuid ModelRelationField and pf2opn creates no
+        # category rows, so the pfSense names are dropped (warned in discover).
         tos = pf_text(rule, "tos")
         if tos:
             sub(root, "tos", tos)

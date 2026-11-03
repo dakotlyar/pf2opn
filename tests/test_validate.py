@@ -86,6 +86,76 @@ def test_alias_with_unknown_nested_alias_is_an_error(minimal_plan) -> None:
     assert any("references unknown alias GHOST" in finding.message for finding in findings)
 
 
+def test_dnsmasq_static_range_with_end_addr_is_an_error(minimal_plan) -> None:
+    """§13 check 8: `mode=static` must not coexist with a non-empty `end_addr`."""
+    _src, plan = minimal_plan
+    out = _el(
+        '<opnsense><dnsmasq><dhcp_ranges><dhcp_ranges uuid="a">'
+        "<interface>lan</interface><start_addr>192.168.1.0</start_addr>"
+        "<end_addr>192.168.1.10</end_addr><mode>static</mode>"
+        "</dhcp_ranges></dhcp_ranges></dnsmasq></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("mode=static with a non-empty end_addr" in f.message for f in findings)
+
+
+def test_dnsmasq_set_tag_must_be_a_row_uuid(minimal_plan) -> None:
+    """§13 check 8: tag relations compare against the dhcp_tags row uuids, not the text."""
+    _src, plan = minimal_plan
+    out = _el(
+        '<opnsense><dnsmasq><dhcp_tags><dhcp_tags uuid="tag-uuid">'
+        "<tag>mytag</tag></dhcp_tags></dhcp_tags>"
+        '<hosts><hosts uuid="h"><ip>192.168.1.10</ip>'
+        "<set_tag>mytag</set_tag></hosts></hosts></dnsmasq></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("unknown tag mytag" in f.message for f in findings)
+
+
+def test_dnsmasq_set_tag_as_row_uuid_passes(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        '<opnsense><dnsmasq><dhcp_tags><dhcp_tags uuid="tag-uuid">'
+        "<tag>mytag</tag></dhcp_tags></dhcp_tags>"
+        '<hosts><hosts uuid="h"><ip>192.168.1.10</ip>'
+        "<set_tag>tag-uuid</set_tag></hosts></hosts></dnsmasq></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_system_dns_gateway_unknown_is_an_error(minimal_plan) -> None:
+    """§13 check 12: system/dns{N}gw must name an output gateway."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><wan><if>igc0</if></wan></interfaces>"
+        "<system><dns1gw>GHOST</dns1gw></system>"
+        "<OPNsense><Gateways><gateway_item><name>G</name>"
+        "<interface>wan</interface></gateway_item></Gateways></OPNsense></opnsense>"
+    )
+    findings = _errors(validate(out, plan))
+    assert any("GHOST" in f.message for f in findings)
+
+
+def test_system_dns_gateway_none_is_ignored(minimal_plan) -> None:
+    """pfSense uses `none` as "no gateway"; it must not trip check 12 (§12.1.1)."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><system><dns1gw>none</dns1gw></system></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_system_dns_gateway_known_passes(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><wan><if>igc0</if></wan></interfaces>"
+        "<system><dns1gw>G</dns1gw></system>"
+        "<OPNsense><Gateways><gateway_item><name>G</name>"
+        "<interface>wan</interface></gateway_item></Gateways></OPNsense></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
 def test_m4_outputs_validate_without_errors(aliases_plan, misc_plan) -> None:
     for src, plan in (aliases_plan, misc_plan):
         out = build_output(plan, src)

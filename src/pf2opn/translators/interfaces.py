@@ -93,6 +93,11 @@ class InterfacesTranslator(Translator):
                 deps.append(f"vlan:{pf_iface.device}")
             elif kind == "wireguard":
                 deps.append(f"wgtun:{pf_iface.device}")
+            # A copied gateway (v4/v6) must resolve to an output gateway (§12.1.2).
+            for tag in ("gateway", "gatewayv6"):
+                gateway = pf_text(pf_iface.el, tag)
+                if gateway:
+                    deps.append(f"gw:{gateway}")
 
             warnings = self._warnings(pf_iface.el)
             items.append(

@@ -62,3 +62,18 @@ def test_redacting_filter_masks_registered_values() -> None:
     )
     assert secrets.RedactingFilter().filter(record) is True
     assert record.getMessage() == f"log line: {secrets._REDACTED}"
+
+
+def test_cli_main_installs_the_redacting_filter(minimal_path, opnsense_base, capsys) -> None:
+    """§11 rule 5: `cli.main()` attaches the filter before parsing anything."""
+    from pf2opn import cli
+
+    root = logging.getLogger()
+    saved = list(root.filters)
+    root.filters = [f for f in root.filters if not isinstance(f, secrets.RedactingFilter)]
+    try:
+        assert cli.main(["inspect", str(minimal_path), "--base", str(opnsense_base)]) == 0
+        assert any(isinstance(f, secrets.RedactingFilter) for f in root.filters)
+    finally:
+        root.filters = saved
+    capsys.readouterr()

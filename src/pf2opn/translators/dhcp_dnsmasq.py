@@ -82,6 +82,11 @@ def _per_host_options(el: etree._Element) -> bool:
     )
 
 
+def _has_dynamic_range(el: etree._Element) -> bool:
+    """True when the subnet has a main ``range`` or a ``pool`` with a range (§12.1.11)."""
+    return el.find("range") is not None or bool(el.findall("pool"))
+
+
 def _option_rows(el: etree._Element) -> list[tuple[str, str]]:
     """Read the DHCP option values shared by a subnet and a staticmap."""
     rows: list[tuple[str, str]] = []
@@ -109,7 +114,7 @@ def _option_placements(
     el: etree._Element,
     *,
     interface: str,
-    tag: str,
+    tag_uuid: str,
     suffix: str,
 ) -> list[Placement]:
     placements: list[Placement] = []
@@ -119,8 +124,8 @@ def _option_placements(
         sub(row, "option", code)
         if interface:
             sub(row, "interface", interface)
-        if tag:
-            sub(row, "tag", tag)
+        if tag_uuid:
+            sub(row, "tag", tag_uuid)
         sub(row, "value", value)
         placements.append(
             Placement("dnsmasq/dhcp_options", Mode.APPEND, element=row, item_id=item.id)
@@ -134,7 +139,7 @@ def _boot_placement(
     el: etree._Element,
     *,
     interface: str,
-    tag: str,
+    tag_uuid: str,
     suffix: str,
 ) -> Placement | None:
     filename = pf_text(el, "filename")
@@ -143,8 +148,8 @@ def _boot_placement(
     row = E("dhcp_boot", uuid=ctx.uuid(item.id, f"{suffix}boot"))
     if interface:
         sub(row, "interface", interface)
-    if tag:
-        sub(row, "tag", tag)
+    if tag_uuid:
+        sub(row, "tag", tag_uuid)
     sub(row, "filename", filename)
     sub(row, "servername", pf_text(el, "tftp"))
     sub(row, "address", pf_text(el, "nextserver"))
@@ -154,6 +159,12 @@ def _boot_placement(
 def _option_warnings(el: etree._Element) -> list[str]:
     """The PARTIAL warnings for a subnet's / staticmap's option fields (§12.1.11)."""
     warnings: list[str] = []
+    if el.find("denyunknown") is not None and _has_dynamic_range(el):
+        warnings.append(
+            "pfSense deny-unknown has no Dnsmasq equivalent; the dynamic range is still served"
+        )
+    if pf_text(el, "domainsearchlist"):
+        warnings.append("domain search list is not RFC 1035-encoded; verify option 119 by hand")
     if pf_text(el, "failover_peerip"):
         warnings.append("dnsmasq HA uses split pools + dhcp/reply_delay, not a failover peer")
     if pf_text(el, "mac_allow") or pf_text(el, "mac_deny"):
@@ -320,8 +331,10 @@ class DhcpRange(Translator):
             placements.append(
                 Placement("dnsmasq/dhcp_ranges", Mode.APPEND, element=element, item_id=item.id)
             )
-        placements.extend(_option_placements(item, ctx, subnet, interface=key, tag="", suffix=""))
-        boot = _boot_placement(item, ctx, subnet, interface=key, tag="", suffix="")
+        placements.extend(
+            _option_placements(item, ctx, subnet, interface=key, tag_uuid="", suffix="")
+        )
+        boot = _boot_placement(item, ctx, subnet, interface=key, tag_uuid="", suffix="")
         if boot is not None:
             placements.append(boot)
         return placements
@@ -332,11 +345,12 @@ class DhcpRange(Translator):
         key = item.data["interface"]
         domain = pf_text(subnet, "domain")
         lease = pf_text(subnet, "defaultleasetime")
-        denyunknown = subnet.find("denyunknown") is not None
         main = subnet.find("range")
         pools = subnet.findall("pool")
-        dynamic = main is not None or bool(pools)
-        mode = "static" if (denyunknown or not dynamic) else ""
+        dynamic = _has_dynamic_range(subnet)
+        # `static` names only a static-only subnet; Dnsmasq.php rejects it with a
+        # non-empty end_addr, so `denyunknown` never sets it (§12.1.11).
+        mode = "" if dynamic else "static"
         description = f"pf2opn: {item.data['descr']}".strip()
 
         rows: list[tuple[str, str, str, str]] = []  # suffix, start, end, domain
@@ -540,10 +554,13 @@ class DhcpStatic(Translator):
         if staticmap is None:
             return []
         tag = item.data["tag"]
+        # `set_tag`/`tag` are ModelRelationFields into dhcp_tags: they hold the
+        # row uuid, not the tag text (§12.1.11).
+        tag_uuid = ctx.uuid(item.id, "tag") if tag else ""
         placements: list[Placement] = []
 
         if tag:
-            tag_row = E("dhcp_tags", uuid=ctx.uuid(item.id, "tag"))
+            tag_row = E("dhcp_tags", uuid=tag_uuid)
             sub(tag_row, "tag", tag)
             placements.append(
                 Placement("dnsmasq/dhcp_tags", Mode.APPEND, element=tag_row, item_id=item.id)
@@ -557,8 +574,8 @@ class DhcpStatic(Translator):
         domain = pf_text(staticmap, "domain")
         if domain:
             sub(host, "domain", domain)
-        if tag:
-            sub(host, "set_tag", tag)
+        if tag_uuid:
+            sub(host, "set_tag", tag_uuid)
         sub(host, "descr", pf_desc(staticmap))
         sub(host, "comments", "")
         sub(host, "local", "0")
@@ -570,11 +587,15 @@ class DhcpStatic(Translator):
             Placement("dnsmasq/hosts", Mode.APPEND, element=host, item_id=item.id)
         )
 
-        if tag:
+        if tag_uuid:
             placements.extend(
-                _option_placements(item, ctx, staticmap, interface="", tag=tag, suffix="h")
+                _option_placements(
+                    item, ctx, staticmap, interface="", tag_uuid=tag_uuid, suffix="h"
+                )
             )
-            boot = _boot_placement(item, ctx, staticmap, interface="", tag=tag, suffix="h")
+            boot = _boot_placement(
+                item, ctx, staticmap, interface="", tag_uuid=tag_uuid, suffix="h"
+            )
             if boot is not None:
                 placements.append(boot)
         return placements

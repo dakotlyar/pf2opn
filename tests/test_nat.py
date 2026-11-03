@@ -58,6 +58,8 @@ def test_port_forward_render(nat_plan) -> None:
     assert rule.findtext("interface") == "wan"
     assert rule.findtext("ipprotocol") == "inet"
     assert rule.findtext("protocol") == "tcp"
+    assert rule.findtext("source/network") == "any"
+    assert rule.find("source/any") is None
     assert rule.findtext("destination/network") == "wanip"
     assert rule.findtext("destination/port") == "8443"
     assert rule.findtext("target") == "192.168.1.50"
@@ -116,6 +118,37 @@ def test_outbound_mode_is_set(nat_plan) -> None:
     assert out.findtext("nat/outbound/mode") == "hybrid"
 
 
+def test_outbound_categories_are_dropped_with_a_warning(nat_plan) -> None:
+    """`snatrules/rule/categories` is a uuid relation; the names must not be copied (§12.1.9)."""
+    src, plan = nat_plan
+    translator = registry.get("nat_out")
+    fake_src = type(
+        "Src",
+        (),
+        {
+            "pf": etree.fromstring(
+                "<pfsense><nat><outbound><mode>hybrid</mode><rule>"
+                "<interface>wan</interface>"
+                "<source><network>lan</network></source>"
+                "<destination><any/></destination>"
+                "<category>WEB</category>"
+                "<descr>categorised rule</descr>"
+                "</rule></outbound></nat></pfsense>"
+            ),
+            "alias_names": set(),
+            "pf_ifaces": {},
+        },
+    )()
+    items = translator.discover(fake_src, plan.ifmap)
+    rule = next(item for item in items if item.id == "snat#0")
+    assert rule.status == Status.PARTIAL
+    assert any("categories not migrated" in warning for warning in rule.warnings)
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(rule, ctx)[0].element
+    assert element.find("categories") is None
+
+
 def test_outbound_disabled_mode_marks_rules_partial(nat_plan) -> None:
     src, _plan = nat_plan
     src.pf.find("nat/outbound/mode").text = "disabled"
@@ -163,6 +196,38 @@ def test_one_to_one_render(nat_plan) -> None:
     assert rule.findtext("destination_net") == "any"
     assert rule.findtext("external") == "203.0.113.0/24"
     assert rule.findtext("natreflection") == "disable"
+
+
+def test_one_to_one_pfsync_reflection_maps_to_enable(nat_plan) -> None:
+    """`onetoone` natreflection has no pfsync/purenat; map to enable + warn (§12.1.10)."""
+    src, plan = nat_plan
+    translator = registry.get("nat_1to1")
+    fake_src = type(
+        "Src",
+        (),
+        {
+            "pf": etree.fromstring(
+                "<pfsense><nat><onetoone>"
+                "<interface>wan</interface><type>binat</type>"
+                "<source><address>192.168.1.10</address></source>"
+                "<destination><any/></destination>"
+                "<external>203.0.113.10</external>"
+                "<natreflection>pfsync+enable</natreflection>"
+                "</onetoone></nat></pfsense>"
+            )
+        },
+    )()
+    items = translator.discover(fake_src, plan.ifmap)
+    item = items[0]
+    assert item.status == Status.PARTIAL
+    assert item.warnings == [
+        "pfSense pfsync NAT reflection has no OPNsense equivalent; "
+        "using proxy NAT reflection"
+    ]
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(item, ctx)[0].element
+    assert element.findtext("natreflection") == "enable"
 
 
 def test_one_to_one_incomplete_is_unsupported(nat_plan) -> None:

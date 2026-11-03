@@ -54,6 +54,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_nat_refs(out))
     findings.extend(_check_dnsmasq(out))
     findings.extend(_check_unbound(out))
+    findings.extend(_check_system_dns_gateways(out))
     findings.extend(_check_versions(out))
     return findings
 
@@ -232,6 +233,23 @@ def _check_routes(out: etree._Element) -> list[Finding]:
                     "error",
                     f"route {route.findtext('network')} uses unknown gateway {gateway}",
                     _path_of(route),
+                )
+            )
+    return findings
+
+
+def _check_system_dns_gateways(out: etree._Element) -> list[Finding]:
+    """§13 check 12: every ``system/dns{N}gw`` names an output gateway."""
+    findings: list[Finding] = []
+    gateways = _output_gateway_names(out)
+    for n in range(1, 9):
+        value = (out.findtext(f"system/dns{n}gw") or "").strip()
+        if value and value != "none" and value not in gateways:
+            findings.append(
+                Finding(
+                    "error",
+                    f"system/dns{n}gw names unknown gateway {value}",
+                    f"system/dns{n}gw",
                 )
             )
     return findings
@@ -429,11 +447,12 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
     return findings
 
 
-def _dnsmasq_tags(out: etree._Element) -> set[str]:
+def _dnsmasq_tag_uuids(out: etree._Element) -> set[str]:
+    """The uuid attrs of the ``dhcp_tags`` rows (the relation targets, §13 check 8)."""
     return {
-        (tag.findtext("tag") or "").strip()
+        uuid
         for tag in out.findall("dnsmasq/dhcp_tags/dhcp_tags")
-        if (tag.findtext("tag") or "").strip()
+        if (uuid := tag.get("uuid"))
     }
 
 
@@ -457,7 +476,7 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
     """§13 check 8: Dnsmasq range interfaces, reservation IPs and tag references."""
     findings: list[Finding] = []
     iface_keys = _output_iface_keys(out)
-    tags = _dnsmasq_tags(out)
+    tags = _dnsmasq_tag_uuids(out)
 
     for row in out.findall("dnsmasq/dhcp_ranges/dhcp_ranges"):
         interface = (row.findtext("interface") or "").strip()
@@ -466,6 +485,17 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
                 Finding(
                     "error",
                     f"Dnsmasq DHCP range uses unknown interface {interface}",
+                    _path_of(row),
+                )
+            )
+        # Dnsmasq.php rejects `mode=static` with a non-empty end_addr.
+        if (row.findtext("mode") or "").strip() == "static" and (
+            row.findtext("end_addr") or ""
+        ).strip():
+            findings.append(
+                Finding(
+                    "error",
+                    "Dnsmasq DHCP range is mode=static with a non-empty end_addr",
                     _path_of(row),
                 )
             )

@@ -172,12 +172,27 @@ def _map_interfaces(raw: str, ifmap: IfaceMap) -> tuple[str, str | None]:
 
 
 def _copy_endpoint(element: etree._Element, ifmap: IfaceMap) -> etree._Element:
-    """Deep-copy a ``<source>``/``<destination>`` block, remapping ``network``."""
-    node = copy.deepcopy(element)
-    for network in node.findall("network"):
-        mapped, _error = map_net(network.text or "", ifmap)
-        if mapped is not None:
-            network.text = mapped
+    """Rebuild a ``<source>``/``<destination>`` for the DNat model (§12.1.8).
+
+    ``DNat.xml`` has no ``any`` child, so pfSense's stray ``<any/>`` is never
+    copied: an any endpoint becomes the ``network`` keyword ``any`` instead. The
+    ``network`` keyword is remapped with :func:`map_net`; ``address``/``not``/
+    ``port`` are copied verbatim.
+    """
+    node = E(element.tag)
+    if element.find("any") is not None:
+        sub(node, "network", "any")
+    elif element.find("network") is not None:
+        value = pf_text(element, "network")
+        mapped, _error = map_net(value, ifmap)
+        sub(node, "network", mapped if mapped is not None else value)
+    elif element.find("address") is not None:
+        sub(node, "address", pf_text(element, "address"))
+    else:
+        sub(node, "network", "any")
+    for child in element:
+        if isinstance(child.tag, str) and child.tag not in {"any", "network", "address"}:
+            node.append(copy.deepcopy(child))
     return node
 
 
@@ -273,6 +288,11 @@ class NatOutbound(Translator):
             if pf_text(rule, "poolopts"):
                 warnings.append(
                     "outbound NAT pool options not migrated; re-select the pool option in the GUI"
+                )
+            if pf_text(rule, "category"):
+                warnings.append(
+                    "outbound NAT categories not migrated; recreate them under "
+                    "Firewall \u25b8 Rules \u25b8 Categories if needed"
                 )
 
             deps: set[str] = {f"iface:{interface}", "snat:mode"}
@@ -423,18 +443,24 @@ class NatOneToOne(Translator):
                 )
                 continue
 
+            reflection, reflection_warning = _one_to_one_reflection(
+                pf_text(rule, "natreflection")
+            )
+            warnings = [reflection_warning] if reflection_warning else []
             items.append(
                 Item(
                     item_id,
                     self.section,
                     label,
                     rule,
-                    Status.OK,
+                    Status.PARTIAL if warnings else Status.OK,
+                    warnings=warnings,
                     data={
                         "sequence": 10 * (index + 1),
                         "source": source,
                         "destination": destination,
                         "external": external,
+                        "natreflection": reflection,
                     },
                 )
             )
@@ -457,9 +483,8 @@ class NatOneToOne(Translator):
         sub(root, "destination_net", data["destination"])
         sub(root, "destination_not", opn_bool(rule.find("destination/not") is not None))
         sub(root, "external", data["external"])
-        natreflection = pf_text(rule, "natreflection")
-        if natreflection:
-            sub(root, "natreflection", natreflection)
+        if data["natreflection"]:
+            sub(root, "natreflection", data["natreflection"])
         sub(root, "description", pf_desc(rule))
         return [
             Placement(
@@ -469,6 +494,24 @@ class NatOneToOne(Translator):
                 item_id=item.id,
             )
         ]
+
+
+def _one_to_one_reflection(value: str) -> tuple[str, str | None]:
+    """Map pfSense 1:1 ``natreflection`` to the OPNsense onetoone set (§12.1.10).
+
+    ``onetoone/rule/natreflection`` is ``default``/``enable``/``disable`` only (no
+    ``purenat``), so the pfsync mechanisms map to ``enable`` with a warning.
+    """
+    if value in {"", "default"}:
+        return "", None
+    if value in {"enable", "disable"}:
+        return value, None
+    if value in {"pfsync", "pfsync+enable"}:
+        return "enable", (
+            "pfSense pfsync NAT reflection has no OPNsense equivalent; "
+            "using proxy NAT reflection"
+        )
+    return "", f"NAT reflection mode {value!r} has no equivalent, dropped"
 
 
 def _mfp_net(rule: etree._Element, field: str) -> str | None:

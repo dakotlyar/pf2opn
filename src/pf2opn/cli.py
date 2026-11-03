@@ -11,7 +11,7 @@ from typing import Sequence
 
 from lxml import etree
 
-from . import __version__
+from . import __version__, secrets
 from .context import SourceContext
 from .ifmap import default_ifmap, validate_ifmap
 from .model import Plan, Selection
@@ -222,6 +222,8 @@ _HANDLERS = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # §11 rule 5: the redaction filter must be attached before any file is parsed.
+    secrets.install_logging_filter()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:

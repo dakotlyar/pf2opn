@@ -184,6 +184,78 @@ def test_filter_unknown_interface_is_unsupported(filter_plan) -> None:
     assert "opt9" in item.reason
 
 
+def test_filter_categories_are_dropped_with_a_warning(filter_plan) -> None:
+    """`categories` is a uuid relation; the pfSense names must not be copied (§12.1.7)."""
+    src, plan = filter_plan
+    translator = registry.get("filter")
+    rule = etree.fromstring(
+        "<rule><type>pass</type><interface>lan</interface>"
+        "<category>WEB</category><tracker>2001</tracker>"
+        "<descr>categorised</descr></rule>"
+    )
+    item = translator._discover_rule(rule, 0, 10, src, plan.ifmap)
+    assert item.status == Status.PARTIAL
+    assert any("categories not migrated" in warning for warning in item.warnings)
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(item, ctx)[0].element
+    assert element.find("categories") is None
+
+
+def test_filter_overload_writes_the_alias_uuid(filter_plan) -> None:
+    src, plan = filter_plan
+    plan.selected.add("alias:RFC1918")
+    translator = registry.get("filter")
+    rule = etree.fromstring(
+        "<rule><type>pass</type><interface>lan</interface>"
+        "<overload>RFC1918</overload><tracker>2002</tracker>"
+        "<descr>overloaded</descr></rule>"
+    )
+    item = translator._discover_rule(rule, 0, 10, src, plan.ifmap)
+    assert "alias:RFC1918" in item.deps
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(item, ctx)[0].element
+    assert element.findtext("overload") == ctx.uuid("alias:RFC1918")
+    assert element.findtext("overload") != "RFC1918"
+
+
+def test_filter_overload_absent_alias_is_dropped_in_discover(filter_plan) -> None:
+    src, plan = filter_plan
+    translator = registry.get("filter")
+    rule = etree.fromstring(
+        "<rule><type>pass</type><interface>lan</interface>"
+        "<overload>GHOST</overload><tracker>2004</tracker>"
+        "<descr>ghost overload</descr></rule>"
+    )
+    item = translator._discover_rule(rule, 0, 10, src, plan.ifmap)
+    assert item.status == Status.PARTIAL
+    assert any("overload alias not migrated" in warning for warning in item.warnings)
+    assert "alias:GHOST" not in item.deps
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(item, ctx)[0].element
+    assert element.find("overload") is None
+
+
+def test_filter_overload_dropped_when_alias_not_migrated(filter_plan) -> None:
+    src, plan = filter_plan
+    plan.selected.discard("alias:RFC1918")
+    translator = registry.get("filter")
+    rule = etree.fromstring(
+        "<rule><type>pass</type><interface>lan</interface>"
+        "<overload>RFC1918</overload><tracker>2003</tracker>"
+        "<descr>overloaded</descr></rule>"
+    )
+    item = translator._discover_rule(rule, 0, 10, src, plan.ifmap)
+
+    ctx = WriteContext(src, plan)
+    element = translator.render(item, ctx)[0].element
+    assert element.find("overload") is None
+    assert item.status == Status.PARTIAL
+    assert any("overload alias not migrated" in warning for warning in item.warnings)
+
+
 def test_filter_golden(filter_plan, golden_checker, section_placements, wrap_placements) -> None:
     src, plan = filter_plan
     placements = section_placements(src, plan, "filter")

@@ -5,9 +5,13 @@ from __future__ import annotations
 from lxml import etree
 
 from pf2opn import cli, registry
-from pf2opn.context import WriteContext
+from pf2opn.context import SourceContext, WriteContext
+from pf2opn.ifmap import default_ifmap
 from pf2opn.model import Status
+from pf2opn.plan import build_plan
 from pf2opn.writer import build_output
+
+_BASE = "tests/fixtures/opnsense/base_26_7.xml"
 
 
 def _items(plan):
@@ -83,3 +87,34 @@ def test_interfaces_output_is_well_formed(interfaces_vlans_plan) -> None:
     out = build_output(plan, src)
     reparsed = etree.fromstring(etree.tostring(out))
     assert reparsed.findtext("interfaces/opt2/descr") == "Guests"
+
+
+def _gateway_source(tmp_path, gateway_name: str):
+    path = tmp_path / "gw.xml"
+    path.write_text(
+        "<pfsense><version>24.0</version>"
+        "<system><hostname>x</hostname><domain>example.test</domain></system>"
+        "<interfaces><lan><if>em1</if><descr>LAN</descr><enable/>"
+        "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet>"
+        f"<gateway>{gateway_name}</gateway></lan></interfaces>"
+        "<gateways><gateway_item><name>LAN_GW</name><interface>lan</interface>"
+        "<gateway>192.168.1.254</gateway></gateway_item></gateways></pfsense>",
+        encoding="utf-8",
+    )
+    src = SourceContext.load(path, _BASE)
+    return src, build_plan(src, default_ifmap(src, {"em1": "igc1"}))
+
+
+def test_interface_declares_gateway_dependency(tmp_path) -> None:
+    """A copied `gateway` must resolve to an output gateway (§12.1.2)."""
+    _src, plan = _gateway_source(tmp_path, "LAN_GW")
+    item = next(i for i in plan.items if i.id == "iface:lan")
+    assert "gw:LAN_GW" in item.deps
+    assert item.status == Status.OK
+
+
+def test_interface_with_unknown_gateway_is_unsupported(tmp_path) -> None:
+    _src, plan = _gateway_source(tmp_path, "GHOST_GW")
+    item = next(i for i in plan.items if i.id == "iface:lan")
+    assert item.status == Status.UNSUPPORTED
+    assert "GHOST_GW" in item.reason

@@ -39,11 +39,15 @@ def test_range_statuses_and_deps(dhcp_plan) -> None:
     items = _items(plan, "dhcp_range")
 
     assert items["dhcp:lan"].status == Status.PARTIAL
-    assert items["dhcp:lan"].warnings == ["max lease time not represented"]
+    assert items["dhcp:lan"].warnings == [
+        "domain search list is not RFC 1035-encoded; verify option 119 by hand",
+        "max lease time not represented",
+    ]
     assert items["dhcp:lan"].deps == ["iface:lan"]
     assert items["dhcp:opt1"].status == Status.PARTIAL
     assert items["dhcp:opt1"].warnings == [
-        "dnsmasq HA uses split pools + dhcp/reply_delay, not a failover peer"
+        "pfSense deny-unknown has no Dnsmasq equivalent; the dynamic range is still served",
+        "dnsmasq HA uses split pools + dhcp/reply_delay, not a failover peer",
     ]
 
 
@@ -74,7 +78,8 @@ def test_range_render_replaces_base_range_not_duplicates(dhcp_plan) -> None:
     assert row.findtext("description") == "pf2opn: LAN"
 
 
-def test_denyunknown_marks_mode_static_and_pools_are_extra_rows(dhcp_plan) -> None:
+def test_denyunknown_keeps_dynamic_range_without_static_mode(dhcp_plan) -> None:
+    """`denyunknown` alone never sets `mode=static`; the range is still served (§12.1.11)."""
     src, plan = dhcp_plan
     translator = registry.get("dhcp_range")
     ctx = WriteContext(src, plan)
@@ -84,9 +89,13 @@ def test_denyunknown_marks_mode_static_and_pools_are_extra_rows(dhcp_plan) -> No
         if p.mode == Mode.APPEND and p.element is not None and p.element.tag == "dhcp_ranges"
     ]
     assert [row.findtext("start_addr") for row in rows] == ["10.0.10.100", "10.0.10.200"]
-    assert all(row.findtext("mode") == "static" for row in rows)
+    assert all(row.find("mode") is None for row in rows)
     # pool rows carry no domain
     assert rows[1].find("domain") is None
+    assert (
+        "pfSense deny-unknown has no Dnsmasq equivalent; the dynamic range is still served"
+        in plan.by_id["dhcp:opt1"].warnings
+    )
 
 
 def test_static_only_subnet_uses_network_address(tmp_path) -> None:
@@ -177,18 +186,20 @@ def test_per_host_options_create_tag_and_tagged_rows(dhcp_plan) -> None:
     paths = [p.path for p in placements]
     assert "dnsmasq/dhcp_tags" in paths
     tag_row = next(p.element for p in placements if p.path.endswith("dhcp_tags"))
-    tag = tag_row.findtext("tag")
-    assert tag == "pf2opn_lan_8c_ce_4e_4b_9e_53"
+    assert tag_row.findtext("tag") == "pf2opn_lan_8c_ce_4e_4b_9e_53"
+    # set_tag/tag are relations to the dhcp_tags row uuid, never the tag text (§12.1.11).
+    tag_uuid = tag_row.get("uuid")
 
     host = next(p.element for p in placements if p.path.endswith("dnsmasq/hosts"))
-    assert host.findtext("set_tag") == tag
+    assert host.findtext("set_tag") == tag_uuid
+    assert host.findtext("set_tag") != "pf2opn_lan_8c_ce_4e_4b_9e_53"
     assert host.findtext("domain") == "perhost.example.test"
 
     tagged_options = [
         p.element for p in placements if p.path.endswith("dhcp_options")
     ]
     assert {o.findtext("option") for o in tagged_options} == {"3", "6", "15"}
-    assert all(o.findtext("tag") == tag for o in tagged_options)
+    assert all(o.findtext("tag") == tag_uuid for o in tagged_options)
     assert all(o.find("interface") is None for o in tagged_options)
 
 

@@ -26,7 +26,7 @@
       <ip>192.168.1.12</ip>
       <host>perhost</host>
       <domain>perhost.example.test</domain>
-      <set_tag>pf2opn_lan_8c_ce_4e_4b_9e_53</set_tag>
+      <set_tag>95d9d9a7-4f92-54b8-9373-b27231502bfc</set_tag>
       <descr/>
       <comments/>
       <local>0</local>
@@ -40,7 +40,7 @@
     <dhcp_options uuid="7eea9777-ab42-56b6-aa9a-1cbe84c6ee39">
       <type>set</type>
       <option>3</option>
-      <tag>pf2opn_lan_8c_ce_4e_4b_9e_53</tag>
+      <tag>95d9d9a7-4f92-54b8-9373-b27231502bfc</tag>
       <value>192.168.1.1</value>
     </dhcp_options>
   </placement>
@@ -48,7 +48,7 @@
     <dhcp_options uuid="37819e49-564e-5c11-9c03-5cd08b5a6a87">
       <type>set</type>
       <option>6</option>
-      <tag>pf2opn_lan_8c_ce_4e_4b_9e_53</tag>
+      <tag>95d9d9a7-4f92-54b8-9373-b27231502bfc</tag>
       <value>1.1.1.1</value>
     </dhcp_options>
   </placement>
@@ -56,7 +56,7 @@
     <dhcp_options uuid="d6af10a2-df9e-5ca6-b0aa-e77a5f4e2809">
       <type>set</type>
       <option>15</option>
-      <tag>pf2opn_lan_8c_ce_4e_4b_9e_53</tag>
+      <tag>95d9d9a7-4f92-54b8-9373-b27231502bfc</tag>
       <value>perhost.example.test</value>
     </dhcp_options>
   </placement>
