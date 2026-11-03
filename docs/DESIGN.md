@@ -197,6 +197,7 @@ below are written the way they are. Do not "improve" them from memory:
 | D10 | **Textual `Tree`** with checkbox glyphs in labels, toggled by Space. | Textual has no checkbox-tree widget. `SelectionList` is flat and can't show sections. |
 | D11 | Translators are **pure**: `render(item, ctx) -> list[Placement]`. Only `writer.py` mutates the output tree. | Translators that mutate the tree directly can't be previewed in the TUI or golden-tested in isolation. |
 | D12 | pfSense cron jobs are **classified, never written**. OPNsense cron only runs configd actions (`ConfigdActionsField`). | Writing shell commands into `OPNsense/cron` produces invalid config. Every cron job in the real config is a pfSense/package internal job anyway. |
+| D13 | **`tui` collects omitted paths on the Load screen**: `SOURCE`, `--base` and `-o/--output` are optional for `tui` only (still required for `inspect`/`migrate`). Provided flags pre-fill the Load-screen fields; the collected values are what the run uses. The three path checks live once, in `paths.py`, and are called by the CLI for flag values and by the Load screen for collected ones (§9, §15). `--report`/`--selection` stay optional flags and are **not** Load-screen fields. | A filesystem browser in the Load screen — Textual has no built-in file dialog and a custom one is out of scope (the ask says keep it small). Keeping `tui`'s paths required — contradicts the ask. Promoting `--report`/`--selection` to Load fields — they already have a default (report) or load/save behaviour (selection) and are not validity-gated, so fields would only add surface. |
 
 ---
 
@@ -257,6 +258,7 @@ pf2opn/
 │   ├── deps.py                # resolve(), closure(), dependents()
 │   ├── selection.py           # JSON load/save, defaults, select_all_ok
 │   ├── plan.py                # build_plan()
+│   ├── paths.py               # shared path checks: source/base parse+root, output same-file/overwrite (§9)
 │   ├── writer.py              # apply placements to base copy, policies, versions, revision
 │   ├── versions.py            # MODEL_VERSIONS (table in §10.3)
 │   ├── validate.py            # §13
@@ -567,12 +569,44 @@ pf2opn inspect SOURCE --base BASE [--json]
 pf2opn migrate SOURCE --base BASE -o OUT [--report REPORT]
                (--select-all-ok | --selection FILE) [--map-nic PF=OPN ...]
                [--keep-base-rules] [--force]
-pf2opn tui     SOURCE --base BASE -o OUT [--report REPORT] [--selection FILE]
+pf2opn tui     [SOURCE] [--base BASE] [-o OUT] [--report REPORT]
+               [--selection FILE] [--force]
 ```
-* `REPORT` defaults to `OUT` with the suffix replaced by `.report.md`.
+* For `inspect` and `migrate`, `SOURCE`, `--base` (and `-o` for `migrate`) are **required**.
+* For `tui` they are **optional**: any of `SOURCE`, `--base`, `-o` that is omitted is collected in
+  the **Load** screen (§15). A provided flag **pre-fills** the matching Load field; the value the
+  Load screen holds at continue time is what the run uses, so an edit in the TUI supersedes the
+  flag and an untouched field keeps the flag's value.
+* `REPORT` defaults to `OUT` with the suffix replaced by `.report.md`. For `tui` the default is
+  derived from the **collected** output path (computed after the Load screen loads, not from
+  `args.output`); an explicit `--report` always overrides it. `--report` and `--selection` are not
+  Load-screen fields: the report path keeps that default, and `--selection` keeps today's load (on
+  start) / save (Review screen `s`) behaviour.
 * The tool refuses (exit 2) if OUT already exists and `--force` isn't given, or if OUT resolves
   to the same file as SOURCE or BASE (`os.path.samefile` when it exists, plus a resolved-path
-  comparison).
+  comparison). In `tui`, an output that already exists is **not** overwritten by a toggle —
+  `--force` stays a flag and the Load screen reports "…exists; pass --force to overwrite".
+
+**Where the path checks live (one source of truth).** `paths.py` owns every check above; `cli.py`
+and the TUI both call it, so flag values and TUI-collected values cannot diverge:
+
+* `parse_pf_root(path)` / `parse_opnsense_root(path)` — parse and require the root element
+  `<pfsense>` / `<opnsense>` (the `ValueError`s `SourceContext.load` already raises move here), and
+  `source_error(path)` / `base_error(path)` wrap them as "message or `None`" for form display.
+  `SourceContext.load` calls the parse functions, so "parses with the right root" is defined once and
+  `load` and the Load screen agree.
+* `same_file(a, b)` and `check_output(out, source, base, force)` — the same-file rule and the
+  refusals (`out == source`/`base`, skipping any path that is omitted/`None`, and `out exists`
+  without `--force`). `cmd_migrate` and `cmd_tui` use them today under other names; the Load screen
+  uses the same functions.
+* The CLI stays **authoritative where a path was passed as a flag**: `cmd_tui` runs
+  `source_error`/`base_error`/`check_output` on every flag that was provided and exits 2 (no TUI)
+  on failure. The Load screen then re-runs the identical functions on the pre-filled value
+  (idempotent), so a flag value never bypasses the screen's validation. When a path is omitted,
+  only the Load screen runs these functions.
+* An invalid path typed in the TUI does **not** exit — the Load screen stays and shows the inline
+  error (§15). Quitting from the Load screen without writing exits 0.
+
 * `inspect` prints one line per item: `STATUS  id  label  [warnings count]`, grouped by
   section. `--json` prints a list of `{id, section, label, status, reason, warnings, deps}`. It
   never prints source XML.
@@ -1663,13 +1697,44 @@ would already be a §11 rule-3 violation, independent of the file mode.
 
 ## 15. TUI (`tui/`)
 
-`Pf2OpnApp(App)` gets `(src: SourceContext, args)`. Screen flow:
-`LoadScreen → IfaceMapScreen → SelectScreen → ReviewScreen → DoneScreen`. Esc/`b` goes back
-one screen. `q` quits from anywhere (confirm modal if the selection changed).
+`Pf2OpnApp(App)` gets `(args)` plus an **optional** preloaded `src`. `pf2opn tui` with no paths
+constructs the app without a context and the Load screen builds it on continue; `pf2opn tui SOURCE
+--base BASE -o OUT` preloads the context as today and the Load screen starts in the loaded state.
+The app's `output_path`/`report_path` come from the **collected** output after the Load screen runs
+(`report_path` = `--report` if given, else the collected output with `.report.md`); the Review
+screen writes there. Screen flow: `LoadScreen → IfaceMapScreen → SelectScreen → ReviewScreen →
+DoneScreen`. Esc/`b` goes back one screen. `q` quits from anywhere (confirm modal if the selection
+changed); quitting from the Load screen without writing exits 0.
 
-**LoadScreen**: a static summary. Source path, pfSense version, hostname, counts per
-top-level section, base path, base hostname, and any base version-mismatch warnings. Keys:
-`enter` continue.
+**LoadScreen**: collects/confirms the three paths, then summarises them.
+
+Three text `Input`s, in order — **pfSense source**, **OPNsense base**, **output** — each pre-filled
+from the matching `tui` flag (`SOURCE`, `--base`, `-o`) when given, else empty. The value collected
+here is what the run uses (a flag pre-fills; an edit supersedes it). Simple `Input`s, **not** a
+filesystem browser: Textual has no built-in file dialog and a custom picker is out of scope.
+`--report` and `--selection` are not fields (they keep their defaults/behaviour — §9).
+
+Validation, shown as inline error text under the offending field (`paths.source_error` /
+`paths.base_error` / `paths.check_output`, §9):
+* **source**: exists, is a readable file, parses, root is `<pfsense>`.
+* **base**: exists, is a readable file, parses, root is `<opnsense>`.
+* **output**: not the same file as source or base, and if it exists then `--force` must be set.
+
+The cheap filesystem checks (`exists`, `is_file`, not-a-directory, `same_file`, exists + `--force`)
+run on every change; the parse + root check is **debounced** (~0.4 s timer reset on each keystroke)
+so a multi-megabyte config is not reparsed per character. (Rejected: parse on every keystroke — too
+costly; parse only on submit — then `enter` could not be gated on validity.)
+
+When source and base parse cleanly the screen loads the context (`SourceContext.load` +
+`build_plan` in a worker) and shows the previous summary — source path, pfSense version, hostname,
+counts per top-level section, base path, base hostname, base version-mismatch warnings, selection
+hash warning. Editing a loaded path clears the summary until it parses again.
+
+`enter` (continue) is **disabled** until all three are valid: the binding's action checks validity
+and, while any field is invalid, stays on the screen and focuses the first invalid field (Textual
+has no per-binding `disabled`, so "disabled" is enforced in the action). Keys: `enter` continue
+(loads the context if needed, hands it to the app, pushes `IfaceMapScreen`); `tab`/`shift+tab` move
+between the fields.
 
 **IfaceMapScreen**: a `DataTable` with columns `Incl | Key | Description | pfSense device |
 Kind | OPNsense device`. VLAN/WG rows show their derived device (read-only, greyed). Physical
@@ -1861,8 +1926,12 @@ allowed-IPs are wider than its host address → PARTIAL; the WG interface has no
 takes it; `host=dynamic` gives the apex hostname; `snmpd` with no `<enable>` and IPsec `mobilekey` are
 both reported unsupported; the unsupported items appear in `inspect`.
 
-**M11 — TUI shell: Load + IfaceMap screens** (§15)
-Accept: pilot tests for mapping validation and the NIC picker.
+**M11 — TUI shell: Load + IfaceMap screens** (§15, §9)
+Accept: `pf2opn tui` with no arguments reaches the Load screen; the Load screen collects
+source/base/output, pre-fills provided flags, blocks `enter` with inline errors until all three
+validate (source/base parse with the right root; output not source/base and `--force` honoured),
+then loads the context; `--report`/`--selection` are not collected. Pilot tests for path
+validation and mapping validation and the NIC picker.
 
 **M12 — TUI Select screen** (§15, §8)
 Accept: pilot tests for toggle, section toggle, cascade confirm, filter, and the detail tabs
