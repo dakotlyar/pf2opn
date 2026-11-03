@@ -127,6 +127,18 @@ Config-format facts (from the model PHP):
 These were read out of the 26.7.8 model XML during the design pass and are the reason several mappings
 below are written the way they are. Do not "improve" them from memory:
 
+* **OPNsense `ArrayField` placement (general rule — read this before writing any list).** A field
+  declared `type="ArrayField"` (or a custom field extending it, e.g. `.\AliasField`) named **X** stores
+  each row as an element *literally named X*, repeated as a direct child of the field's parent, each
+  carrying a `uuid` — e.g. Dnsmasq's `dhcp_ranges`, `hosts`, `dhcp_tags`, `dhcp_options`, `dhcp_boot`
+  are repeated `<dhcp_ranges uuid="…">…</dhcp_ranges>` / `<hosts uuid="…">…</hosts>` / … **siblings
+  directly under `<dnsmasq>`** (confirmed against the stock base config and `helpers.toList('dnsmasq.dhcp_ranges')`).
+  **There is no wrapper element named after the field**; the entry element *is* the field name. This is
+  distinct from a **container**, which is a single wrapper element whose rows live under a differently
+  named child: Firewall Alias's `<aliases>` is such a container, so `OPNsense/Firewall/Alias/aliases/alias[]`
+  (container `aliases`, `ArrayField` `alias`) is correct there — but do not extrapolate that shape to a
+  field that is *itself* an `ArrayField`. The earlier DHCP draft got this wrong and wrote a
+  `dhcp_ranges`/`hosts` wrapper — see §12.1.11.
 * Filter `state-policy` is an `OptionField` whose only values are `if-bound` and `floating` — it is **not**
   free text. pfSense stores it as `state-policy`; empty is the normal case.
 * Source-NAT `snatrules/rule/poolopts` values are opaque keys `p1`…`p6`, **not** pfSense strings such as
@@ -708,7 +720,7 @@ element), with a `uuid` attribute unless stated otherwise.
 | nat/rule | 1 | nat_pf (100) | `nat/rule[]` | §12.1.8 |
 | nat/outbound | 1 | nat_out (101) | `nat/outbound/mode` and `OPNsense/Firewall/Filter/snatrules/rule[]` | §12.1.9 |
 | nat/onetoone | 1 | nat_1to1 (102) | `OPNsense/Firewall/Filter/onetoone/rule[]` | §12.1.10 |
-| dhcpd | 1 | dhcp_range (110), dhcp_static (111) | `dnsmasq/dhcp_ranges` + `dnsmasq/hosts` | §12.1.11 |
+| dhcpd | 1 | dhcp_range (110), dhcp_static (111) | `dnsmasq` (`ArrayField` entries `dhcp_ranges`, `hosts` — repeated direct children, §12.1.11) | §12.1.11 |
 | unbound | 1 | dns_general (120), dns_host (121), dns_static_host (122), dns_domain (123), dns_acl (124) | `OPNsense/unboundplus/*` | §12.1.13 |
 | dyndnses | 1 | dyndns (130) | `OPNsense/DynDNS/*` (plugin os-ddclient) | §12.1.18 |
 | syslog | 1 | syslog (140) | `OPNsense/Syslog/destinations/destination[]` | §12.1.19 |
@@ -906,7 +918,7 @@ info note in the report.
 | `disabled` | presence → `1` (omit otherwise) |
 | `nordr` | presence → `1` |
 | `interface` | mapped key (excluded → UNSUPPORTED) |
-| `ipprotocol` | pf or `inet` |
+| `ipprotocol` | **derive, do not default** (the same rule as §12.1.9, required by §13 check 13). Explicit pf `ipprotocol` (`inet`/`inet6`) is kept; empty → `inet6` when any of the rendered `source`/`destination` addresses or `target` is an IPv6 literal or CIDR (contains `:`), otherwise `inet`. **Never let an IPv6 endpoint keep `inet`:** `pfctl` rejects the rule ("rule expands to no valid combination") and the whole ruleset fails to load (0 rules). |
 | `protocol` | pf `protocol` as-is (lower case) |
 | `source`, `destination` | rebuild with `network`/`address`/`port`/`not`, keyword keys validated via `map_net`. **Do not copy pfSense's `<any/>`:** `DNat.xml` has no `any` child, so a copied `<any/>` is a stray node the model ignores. For an `any` endpoint emit `<network>any</network>` instead (the `NetworkAliasField` keyword `any`, same token the filter rules use for `source_net`; an empty `network` also means any, but be explicit). |
 | `target` | pf `target` (IP or alias; dep alias) |
@@ -992,9 +1004,19 @@ empty → omit. Do **not** copy `pfsync` verbatim the way `MFP1_0_4.php` does �
 #### 12.1.11 DHCPv4 → Dnsmasq (`dhcp_dnsmasq.py`)
 
 Source: `pf:dhcpd/<ifkey>` (kept keyed by pfSense interface key, D3). Target: `opn:dnsmasq` — model
-`OPNsense/Dnsmasq/Dnsmasq.xml`, mount `/dnsmasq`, **version 1.0.9** (read from `26.7.8`; the containers
+`OPNsense/Dnsmasq/Dnsmasq.xml`, mount `/dnsmasq`, **version 1.0.9** (read from `26.7.8`; the `ArrayField`s
 `dhcp_ranges`, `hosts`, `dhcp_tags`, `dhcp_options`, `dhcp_boot` and every field below are verbatim from
-that model). Two translators keep the familiar item/de-dup/status shape:
+that model).
+
+**Placement (must match the model exactly).** These are `ArrayField`s (see the general rule in §2.1), so
+each row is a repeated same-named element **directly under `<dnsmasq>`**:
+`<dnsmasq><dhcp_ranges uuid="…">…</dhcp_ranges><dhcp_ranges uuid="…">…</dhcp_ranges>…</dnsmasq>`, and
+identically for `hosts` / `dhcp_tags` / `dhcp_options` / `dhcp_boot`. There is **no** `dhcp_ranges` /
+`hosts` / … wrapper element; the entry element *is* the field name. (Verified from the stock base config —
+two sibling `<dhcp_ranges uuid>` under `<dnsmasq>`, `helpers.toList('dnsmasq.dhcp_ranges')`, and the
+generated `dnsmasq.conf`. The M14 import test proved that a nested `<dhcp_ranges><dhcp_ranges uuid>` is
+silently ignored: the 8 ranges, 48 reservations, 6 options and 4 tags never appeared on import.) Two
+translators keep the familiar item/de-dup/status shape:
 
 * `dhcp_range` (order 110, base_policy `none`): one item per **enabled** `pf:dhcpd/<ifkey>`, id
   `dhcp:<ifkey>`; renders one or more `dhcp_ranges` rows.
@@ -1013,14 +1035,16 @@ Discovery: one per `pf:dhcpd/<ifkey>` **with `enable` present** (a disabled subn
 before). Deps: `iface:<ifkey>`; the interface needs a static IPv4 address, else UNSUPPORTED "Dnsmasq
 needs a static interface address".
 
-Render (per item) → **first REMOVE** `opn:dnsmasq/dhcp_ranges/dhcp_ranges[interface='<k>']` (the base's
-default row for this interface), **then APPEND** one `dhcp_ranges` element per range (uuid =
-`ctx.uuid("dhcp:<k>","r<n>")`). The REMOVE is the item's *first* placement so the writer (§10.1) applies
-it before the APPENDs; it **inverts** the old Kea rule — a fresh 26.7 sample ships a default LAN row, so
-it must be cleared or LAN ends up with two ranges. It **cannot** live in `finalize`: the writer applies
-`render` before `finalize`, so a `finalize` REMOVE would delete the rows the section had just appended.
+Render (per item) → **first REMOVE** `opn:dnsmasq/dhcp_ranges[interface='<k>']` (the base's
+default row for this interface; the entry element is named `dhcp_ranges`, a direct child of `dnsmasq` —
+**not** nested under a `dhcp_ranges` wrapper), **then APPEND** one `<dhcp_ranges>` element per range
+under `opn:dnsmasq` (uuid = `ctx.uuid("dhcp:<k>","r<n>")`). The REMOVE is the item's *first* placement so
+the writer (§10.1) applies it before the APPENDs; it **inverts** the old Kea rule — a fresh 26.7 sample
+ships a default LAN row, so it must be cleared or LAN ends up with two ranges. It **cannot** live in
+`finalize`: the writer applies `render` before `finalize`, so a `finalize` REMOVE would delete the rows
+the section had just appended.
 
-| opn `dhcp_ranges/…` | value |
+| field on the `<dhcp_ranges uuid>` entry | value |
 |---|---|
 | `interface` | mapped iface key (excluded → UNSUPPORTED) |
 | `start_addr` | main row: pf `range/from`; each `pool[]/range` row: its own `from`. A subnet with **no** `range`/`pool` (static maps only) is written `mode=static` with `start_addr` = the interface's network address (bare, no mask — `RangeAddressField` accepts it; §2.1) |
@@ -1040,9 +1064,10 @@ One per `pf:dhcpd/<ifkey>/staticmap`; the id de-dups on `ifkey`+`mac` (a MAC lis
 `ipaddr` empty → UNSUPPORTED "Dnsmasq reservation needs an IP address"; `ipaddr` outside the interface
 subnet → UNSUPPORTED.
 
-Render → APPEND to `opn:dnsmasq/hosts` a `hosts` element (uuid = `ctx.uuid("dhcpres:<k>:<mac>")`):
+Render → **APPEND** a `<hosts>` element under `opn:dnsmasq` (uuid = `ctx.uuid("dhcpres:<k>:<mac>")`; the
+entry element is named `hosts`, a direct child — **not** nested under a `hosts` wrapper):
 
-| opn `hosts/…` | value |
+| field on the `<hosts uuid>` entry | value |
 |---|---|
 | `hwaddr` | pf `mac` (lower-case) |
 | `client_id` | pf `cid` if non-empty |
@@ -1530,25 +1555,35 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    `gateway` is an output gateway name.
 6. **Gateways**: names unique; `interface` exists in output interfaces.
 7. **Static routes**: `gateway` exists.
-8. **Dnsmasq DHCP**: every migrated `dhcp_ranges.interface` is an output interface key; no
-   `dhcp_ranges` row has `mode=static` together with a non-empty `end_addr` (`Dnsmasq.php` rejects that
+8. **Dnsmasq DHCP**: every migrated `<dhcp_ranges>` entry's `interface` is an output interface key; no
+   `<dhcp_ranges>` entry has `mode=static` together with a non-empty `end_addr` (`Dnsmasq.php` rejects that
    — "Static only accepts a starting address"); reservation IPs are unique and each falls inside **at
-   least one** output interface subnet (the `hosts` row carries no interface, so a per-reservation
-   interface check isn't possible); every `hosts.set_tag` / `dhcp_options.tag` / `dhcp_boot.tag` value
-   equals the **uuid** of an existing `dhcp_tags` row (compared against the row uuids, not the tag
-   text); every emitted `dhcp_options` row has `type=set` (we never emit `match`).
+   least one** output interface subnet (a `<hosts>` entry carries no interface, so a per-reservation
+   interface check isn't possible); every `<hosts>` `set_tag` / `<dhcp_options>` `tag` / `<dhcp_boot>`
+   `tag` value equals the **uuid** of an existing `<dhcp_tags>` entry (compared against the entry uuids,
+   not the tag text); every emitted `<dhcp_options>` entry has `type=set` (we never emit `match`). These
+   are the repeated same-named siblings directly under `<dnsmasq>` (§2.1, §12.1.11), not children of a
+   wrapper.
 9. **WireGuard** (M10): each server `peers` uuid exists in clients; instances unique; names unique.
 10. **Unbound**: each alias `host` uuid exists.
 11. **Aliases**: names unique; nested alias entries exist.
 12. **system/dns{N}gw**: the named gateway exists (M4).
-13. **Address-family match on NAT rules**: for every `snatrules/rule`, `onetoone/rule` and
-   `nat/rule` (port forward), `ipprotocol` must match the family of its address fields
-   (`source_net`/`destination_net`/`target`, and `source`/`destination`/`external` for
-   `nat`/`onetoone`): an address that contains `:` requires `inet6`, a colon-free address requires
-   `inet`; a keyword (`any`, `(self)`, `<key>`/`<key>ip`), an alias name, or an empty value imposes
-   no constraint. This mirrors `Firewall/Filter.php::performValidation()`; a mismatch is a **model
-   error**, and on OPNsense a lone `nat … inet from ::1/128` makes `pfctl` reject the whole
-   `/tmp/rules.debug` ("rule expands to no valid combination" → 0 rules loaded).
+13. **Address-family match on NAT rules**: `ipprotocol` must match the family of the rule's
+   address-bearing fields.
+   * `snatrules/rule`: `source_net`, `destination_net`, `target`.
+   * `onetoone/rule`: **no-op** — the model's 1:1 rule has **no `ipprotocol` field** (it carries only
+     `source_net`/`destination_net`/`external`, and `MFP1_0_4.php` emits no such field), so there is
+     nothing to compare; check 13 does not apply to 1:1 and must not pretend to test it.
+   * `nat/rule` (port forward): read the `source` and `destination` **endpoint elements themselves**,
+     not just `source/network`/`destination/network`. A DNat endpoint stores its address in **either**
+     `network` **or** `address` (`DNat.xml` marks `address` volatile; a host/alias port-forward endpoint
+     renders as `<address>`), so the check must inspect both children — reading `network` alone silently
+     misses every `<address>` endpoint. Also include `target`.
+   An address that contains `:` requires `inet6`, a colon-free address requires `inet`; a keyword
+   (`any`, `(self)`, `<key>`/`<key>ip`), an alias name, or an empty value imposes no constraint.
+   This mirrors `Firewall/Filter.php::performValidation()`; a mismatch is a **model error**, and on
+   OPNsense a lone `nat … inet from ::1/128` makes `pfctl` reject the whole `/tmp/rules.debug`
+   ("rule expands to no valid combination" → 0 rules loaded).
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
 sanitizing; `nat/outbound/mode` automatic with snat rules present; pfSense `hybrid` outbound NAT
@@ -1683,7 +1718,11 @@ They're written by hand and modelled on the real structure documented in this sp
   dyndns cloudflare, syslog remote, cron items, plus the unsupported package stubs.
 * `tests/fixtures/opnsense/base_26_7.xml`: `config.xml.sample` from 26.7.8 (copied), with
   wan `if=igc0`, lan `if=igc1`, and version attributes on `OPNsense/Firewall/Filter` (`1.0.6`)
-  and `dnsmasq` (`1.0.9`).
+  and `dnsmasq` (`1.0.9`). **`config.xml.sample`'s Dnsmasq section must keep its real structure: each
+  row is a repeated same-named element directly under `<dnsmasq>` (the sample ships one
+  `<dhcp_ranges uuid=…>` for LAN — a sibling, not inside a `dhcp_ranges` wrapper).** Keep that sibling
+  shape in the fixture; goldens must assert migrated rows are emitted the same way (§2.1 rule, §12.1.11).
+  A nested `dhcp_ranges`/`hosts` wrapper in the fixture would hide the M14 import bug again.
 
 ### 16.2 Golden tests (per translator)
 `tests/test_<translator>.py`: load the fixture, build the plan with a fixed ifmap
@@ -2050,3 +2089,22 @@ Spec edits: §12.1.9 mode table + `ipprotocol` row, §13 check 13 + warning. Not
 pfSense `hybrid` config exists whose stored rule list is *not* a superset of its runtime automatic
 set — if so, mapping to `advanced` would drop that automatic coverage; the `hybrid`+0-rules →
 `automatic` guard covers the empty case only.
+
+### 2026-11-03 — M14 import findings: Dnsmasq `ArrayField` placement, and check-13 gaps
+
+The first real import into the throwaway OPNsense 26.7 VM (M14, `cf99p03`) exposed three spec errors the
+synthetic tests could not (`dhcp_ranges` check 8 passing while the imported rows were ignored):
+
+* **Dnsmasq arrays are repeated same-named siblings, not nested.** pf2opn wrote
+  `<dnsmasq><dhcp_ranges><dhcp_ranges uuid=…>…` but the model mounts the `ArrayField`s directly under
+  `/dnsmasq`, so the rows are `<dnsmasq><dhcp_ranges uuid=…>…</dhcp_ranges><dhcp_ranges uuid=…>…`.
+  Verified against the stock base config (two sibling `<dhcp_ranges uuid>`), `helpers.toList('dnsmasq.dhcp_ranges')`
+  and the generated `dnsmasq.conf`; the nested form is silently ignored (8 ranges, 48 reservations, 6
+  options, 4 tags never appeared). §12.1.11 now states the placement and the general `ArrayField` rule
+  (§2.1); §13 check 8's path wording and the §16.1 base-fixture description were corrected to match.
+* **§12.1.8 `ipprotocol`** still said "pf or `inet`" — now "derive, do not default", matching §12.1.9 and
+  required by §13 check 13.
+* **§13 check 13**: for `nat/rule` the family must be read from the `source`/`destination` endpoint
+  elements themselves (`DNat.xml` stores the address in either `network` or the volatile `address`, so a
+  host/alias endpoint rendered as `<address>` was missed); `onetoone/rule` is now an explicit no-op
+  because the 1:1 rule has no `ipprotocol` field.
