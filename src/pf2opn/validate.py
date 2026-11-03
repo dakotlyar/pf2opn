@@ -52,6 +52,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_aliases(out))
     findings.extend(_check_filter_refs(out))
     findings.extend(_check_nat_refs(out))
+    findings.extend(_check_dnsmasq(out))
     findings.extend(_check_versions(out))
     return findings
 
@@ -424,6 +425,114 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
             findings,
             path,
         )
+    return findings
+
+
+def _dnsmasq_tags(out: etree._Element) -> set[str]:
+    return {
+        (tag.findtext("tag") or "").strip()
+        for tag in out.findall("dnsmasq/dhcp_tags/dhcp_tags")
+        if (tag.findtext("tag") or "").strip()
+    }
+
+
+def _interface_networks(
+    out: etree._Element,
+) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for iface in _interface_elements(out):
+        ipaddr = (iface.findtext("ipaddr") or "").strip()
+        mask = (iface.findtext("subnet") or "").strip()
+        if not ipaddr or not mask:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(f"{ipaddr}/{mask}", strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _check_dnsmasq(out: etree._Element) -> list[Finding]:
+    """§13 check 8: Dnsmasq range interfaces, reservation IPs and tag references."""
+    findings: list[Finding] = []
+    iface_keys = _output_iface_keys(out)
+    tags = _dnsmasq_tags(out)
+
+    for row in out.findall("dnsmasq/dhcp_ranges/dhcp_ranges"):
+        interface = (row.findtext("interface") or "").strip()
+        if interface and interface not in iface_keys:
+            findings.append(
+                Finding(
+                    "error",
+                    f"Dnsmasq DHCP range uses unknown interface {interface}",
+                    _path_of(row),
+                )
+            )
+
+    for field, kind in (
+        ("dnsmasq/dhcp_options/dhcp_options", "option"),
+        ("dnsmasq/dhcp_boot/dhcp_boot", "boot"),
+    ):
+        for row in out.findall(field):
+            tag = (row.findtext("tag") or "").strip()
+            if tag and tag not in tags:
+                findings.append(
+                    Finding(
+                        "error",
+                        f"Dnsmasq DHCP {kind} references unknown tag {tag}",
+                        _path_of(row),
+                    )
+                )
+
+    for host in out.findall("dnsmasq/hosts/hosts"):
+        tag = (host.findtext("set_tag") or "").strip()
+        if tag and tag not in tags:
+            findings.append(
+                Finding(
+                    "error",
+                    f"Dnsmasq reservation references unknown tag {tag}",
+                    _path_of(host),
+                )
+            )
+
+    for option in out.findall("dnsmasq/dhcp_options/dhcp_options"):
+        option_type = (option.findtext("type") or "").strip()
+        if option_type != "set":
+            findings.append(
+                Finding(
+                    "error",
+                    f"Dnsmasq DHCP option type {option_type!r} is not 'set'",
+                    _path_of(option),
+                )
+            )
+
+    networks = _interface_networks(out)
+    seen: set[str] = set()
+    for host in out.findall("dnsmasq/hosts/hosts"):
+        raw = (host.findtext("ip") or "").strip()
+        for ip in (part.strip() for part in raw.split(",")):
+            if not ip:
+                continue
+            path = _path_of(host)
+            if ip in seen:
+                findings.append(Finding("error", f"duplicate Dnsmasq reservation IP {ip}", path))
+                continue
+            seen.add(ip)
+            try:
+                address = ipaddress.ip_address(ip)
+            except ValueError:
+                findings.append(
+                    Finding("error", f"Dnsmasq reservation IP {ip!r} is invalid", path)
+                )
+                continue
+            if networks and not any(address in network for network in networks):
+                findings.append(
+                    Finding(
+                        "error",
+                        f"Dnsmasq reservation IP {ip} is outside every interface subnet",
+                        path,
+                    )
+                )
     return findings
 
 

@@ -86,6 +86,14 @@ def nat_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def dhcp_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``dhcp.xml`` (fixed NIC map)."""
+    return _fixture_plan(
+        "dhcp.xml", opnsense_base, {"em0": "igc0", "em1": "igc1", "em2": "igc2"}
+    )
+
+
+@pytest.fixture
 def misc_plan(opnsense_base: Path):
     """(SourceContext, Plan) for ``misc.xml``."""
     return _fixture_plan(
