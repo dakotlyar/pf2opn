@@ -1738,7 +1738,9 @@ between the fields.
 
 **IfaceMapScreen**: a `DataTable` with columns `Incl | Key | Description | pfSense device |
 Kind | OPNsense device`. VLAN/WG rows show their derived device (read-only, greyed). Physical
-rows are editable. Keys:
+rows are editable. The `Incl` cell uses the same glyphs as the Select tree — `[x]` include,
+`[ ]` exclude — with every row bracketed so the column aligns; `unsupported`-kind rows always
+show `[ ]` (the `Kind` column says why). Keys:
 * `space`: toggle Incl (not allowed for `unsupported` kind).
 * `enter`: on a physical row, open `NicPickerModal`: a `Select` of `target_nics(src)` plus an
   `Input` for free text. Applies to every row that uses the same pf NIC.
@@ -1753,9 +1755,67 @@ rows are editable. Keys:
   tier-1 classifier, §12.1.16) keeps a "Cron" section, it does not move under "Not translatable".
   The grouping key is `translator.tier == 0`; it is **not** "all items in this section are
   UNSUPPORTED".
-  * Item label: `"[x] ✔ label"` / `"[ ] ⚠ label"` / `"    ✖ label"`. Colours: OK green,
-    PARTIAL yellow, UNSUPPORTED red/dim.
-  * Section label: `"[x]"` all / `"[-]"` some / `"[ ]"` none, plus `title (selected/total)`.
+  * **Item label — the leading bracket is selection *only*.** `[x]` = selected, `[ ]` =
+    not selected; `[-]` is never used on an item. Status is a **separate glyph after the
+    label**, so it can never be read as the checkbox. OK items carry no marker. Every row
+    carries a bracket — including untranslatable ones — so the checkbox column aligns. The
+    five exact templates (`item_label(item, selected)`):
+
+    | status | selected | exact label |
+    |---|---|---|
+    | OK | yes | ``[x] <label>`` |
+    | OK | no | ``[ ] <label>`` |
+    | PARTIAL | yes | ``[x] <label> ⚠`` |
+    | PARTIAL | no | ``[ ] <label> ⚠`` |
+    | UNSUPPORTED | never | ``[ ] <label> ✖`` |
+
+    `<label>` is `Item.label` verbatim. The trailing marker (`⚠` = PARTIAL, `✖` =
+    UNSUPPORTED, nothing = OK) is the status annotation, never the checkbox. Colours:
+    OK green (`$success`), PARTIAL yellow (`$warning`), UNSUPPORTED red (`$error`)/dim,
+    applied to the label + its marker. The bracket is **not** colour-coded to selection —
+    the glyph, not the colour, says selected. UNSUPPORTED items are never selectable and
+    always render `[ ]`; `space` on one shows the "cannot be migrated" notification (see
+    keys below).
+
+  * **Section label — derived from the section's *selectable* items.** `[x]` all
+    selectable items selected / `[-]` some / `[ ]` none, plus `title (n/total)`, where
+    **both the bracket and `n/total` are computed over the section's selectable items**,
+    so `n == total` exactly when the bracket is `[x]`.
+    * *Selectable* means `item.status != Status.UNSUPPORTED`. **Read-only interface items
+      are selectable** (`readonly_selection=True` only means `space` cannot toggle them in
+      this tree — they are toggled on the map, §12.1.2); the earlier bug used
+      "tree-toggleable" for the bracket, which is why `Interfaces` showed `[ ] … (2/3)`
+      with 2 included. Section accounting uses `is_selectable`, **not** `is_toggleable`.
+    * **UNSUPPORTED items are shown as `[ ] <label> ✖` rows but are excluded from `n` and
+      `total`** — they can never be selected, so counting them would force every section
+      containing one to report partial forever and make `n == total` unreachable. A
+      section with no selectable items (e.g. the `cron` classifier, all UNSUPPORTED)
+      reads `[ ] title (0/0)`.
+    * Worked example: an `Interfaces` section with three selectable interfaces, two
+      included → ``[-] Interfaces (2/3)``; include the third → ``[x] Interfaces (3/3)``;
+      exclude all → ``[ ] Interfaces (0/3)``.
+
+    ```python
+    # widgets.py — exact semantics
+    STATUS_MARKER = {Status.OK: "", Status.PARTIAL: " \u26a0", Status.UNSUPPORTED: " \u2716"}
+
+    def is_selectable(item: Item) -> bool:      # counted by section_label
+        return item.status != Status.UNSUPPORTED
+
+    def is_toggleable(item: Item) -> bool:      # space may toggle it in the tree
+        return is_selectable(item) and not item.readonly_selection
+
+    def item_label(item: Item, selected: bool) -> str:
+        check = "[x]" if selected and is_selectable(item) else "[ ]"
+        return f"{check} {item.label}{STATUS_MARKER[item.status]}"
+
+    def section_label(title: str, items: list[Item], selected: set[str]) -> str:
+        selectable = [i for i in items if is_selectable(i)]
+        chosen = sum(1 for i in selectable if i.id in selected)
+        total = len(selectable)
+        prefix = "[ ]" if total == 0 or chosen == 0 else "[x]" if chosen == total else "[-]"
+        return f"{prefix} {title} ({chosen}/{total})"
+    ```
 * Right: `DetailPane` = `TabbedContent` with:
   * "Source": `TextArea(read_only=True, language="xml")` with `redacted_xml(item.source)`.
   * "Preview": the redacted serialization of `render()` placements for this item (path
@@ -1935,7 +1995,9 @@ validation and mapping validation and the NIC picker.
 
 **M12 — TUI Select screen** (§15, §8)
 Accept: pilot tests for toggle, section toggle, cascade confirm, filter, and the detail tabs
-showing redacted text.
+showing redacted text. Unit tests pin the §15 label templates: `item_label` for each
+status/selection case and `section_label`'s bracket + `n/total` (including the
+no-selectable-items `(0/0)` case); the interface-map `Incl` cell is asserted `[x]`/`[ ]`.
 
 **M13 — TUI Review/Write/Done + save selection** (§15, §9)
 Accept: a pilot test writes the output; the saved selection JSON reproduces the identical
