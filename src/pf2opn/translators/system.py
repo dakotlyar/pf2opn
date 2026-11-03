@@ -230,7 +230,8 @@ class SystemTranslator(Translator):
         return placements
 
     def _render_ssh(self, item: Item, ctx: WriteContext) -> list[Placement]:
-        ssh = item.source.find("ssh")
+        # item.source is the <ssh> element itself (see _ssh discovery).
+        ssh = item.source
         placements: list[Placement] = []
         enabled = pf_text(ssh, "enable")
         if enabled:

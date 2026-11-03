@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
 
-from pf2opn import cli
-from pf2opn.model import Status
+from lxml import etree
+
+from pf2opn import cli, registry
+from pf2opn.context import WriteContext
+from pf2opn.model import Mode, Status
 
 EXPECTED_FACETS = {
     "system:hostname",
@@ -70,6 +74,46 @@ def test_inspect_json(minimal_path, opnsense_base, capsys) -> None:
     hostname = next(entry for entry in payload if entry["id"] == "system:hostname")
     assert hostname["status"] == "ok"
     assert hostname["section"] == "system"
+
+
+def _wrap_placements(placements) -> str:
+    root = etree.Element("golden")
+    for placement in placements:
+        node = etree.SubElement(root, "placement")
+        node.set("path", placement.path)
+        node.set("mode", placement.mode.value)
+        if placement.element is not None:
+            node.append(copy.deepcopy(placement.element))
+        elif placement.text is not None:
+            node.text = placement.text
+    return etree.tostring(root, pretty_print=True, encoding="unicode")
+
+
+def test_system_golden(minimal_plan, golden_checker) -> None:
+    src, plan = minimal_plan
+    translator = registry.get("system")
+    plan.selected = {
+        item.id
+        for item in plan.items
+        if item.section == "system" and item.default_selected and item.status != Status.UNSUPPORTED
+    }
+    ctx = WriteContext(src, plan)
+    placements = []
+    for item in plan.items:
+        if item.section != "system" or item.id not in plan.selected:
+            continue
+        placements.extend(translator.render(item, ctx))
+    golden_checker("system/minimal.xml", _wrap_placements(placements))
+
+
+def test_root_password_render(minimal_plan) -> None:
+    src, plan = minimal_plan
+    plan.selected = {"system:root_password"}
+    placements = registry.get("system").render(plan.by_id["system:root_password"], WriteContext(src, plan))
+    assert len(placements) == 1
+    assert placements[0].mode == Mode.SET
+    assert placements[0].path == "system/user[name='root']/password"
+    assert placements[0].text.startswith("$2y$")
 
 
 def test_inspect_rejects_bad_source(tmp_path, opnsense_base, capsys) -> None:

@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from lxml import etree
 
 from . import __version__
 from .context import SourceContext
+from .model import Plan, Selection
 from .plan import build_default_ifmap, build_plan
-from .model import Plan
 from .registry import all_translators
+from .report import render_report
+from .selection import compute_selection, load_selection
+from .validate import validate
+from .writer import build_output, write_output
 
 _PROG = "pf2opn"
 
@@ -68,11 +74,15 @@ class UsageError(Exception):
 # --------------------------------------------------------------------------- #
 
 
-def _load_plan(source: str, base: str) -> tuple[SourceContext, Plan]:
+def _load_source(source: str, base: str) -> SourceContext:
     try:
-        src = SourceContext.load(source, base)
+        return SourceContext.load(source, base)
     except (OSError, ValueError, etree.XMLSyntaxError) as exc:
         raise UsageError(str(exc)) from exc
+
+
+def _load_plan(source: str, base: str) -> tuple[SourceContext, Plan]:
+    src = _load_source(source, base)
     ifmap = build_default_ifmap(src)
     return src, build_plan(src, ifmap)
 
@@ -111,8 +121,87 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _parse_nic_pairs(pairs: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise UsageError(f"invalid --map-nic {pair!r}, expected PF=OPN")
+        pf_nic, opn_nic = (part.strip() for part in pair.split("=", 1))
+        if not pf_nic or not opn_nic:
+            raise UsageError(f"invalid --map-nic {pair!r}, expected PF=OPN")
+        mapping[pf_nic] = opn_nic
+    return mapping
+
+
+def _same_file(a: Path | str, b: Path | str) -> bool:
+    pa, pb = Path(a), Path(b)
+    try:
+        if pa.exists() and pb.exists() and os.path.samefile(pa, pb):
+            return True
+    except OSError:  # pragma: no cover - platform dependent
+        pass
+    return pa.resolve() == pb.resolve()
+
+
+def _report_path(output: str, report: str | None) -> Path:
+    if report:
+        return Path(report)
+    out = Path(output)
+    return out.with_name(out.stem + ".report.md")
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
-    raise NotImplementedError("migrate is implemented in milestone M2")
+    src = _load_source(args.source, args.base)
+
+    if args.selection:
+        try:
+            sel = load_selection(args.selection)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise UsageError(str(exc)) from exc
+    else:
+        sel = Selection()
+
+    nic_map = dict(sel.nic_map)
+    nic_map.update(_parse_nic_pairs(args.map_nic))
+
+    ifmap = build_default_ifmap(src, nic_map)
+    for key, spec in sel.interfaces.items():
+        target = ifmap.targets.get(key)
+        if target is not None:
+            target.include = bool(spec.get("include", True))
+
+    plan = build_plan(src, ifmap)
+    plan.options["keep_base_rules"] = args.keep_base_rules
+    try:
+        plan.selected = compute_selection(plan, sel)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+
+    if sel.source_sha256 and sel.source_sha256 != src.source_sha256:
+        print(
+            "pf2opn: warning: selection source_sha256 does not match the source file",
+            file=sys.stderr,
+        )
+
+    out_path = Path(args.output)
+    if out_path.exists() and not args.force:
+        raise UsageError(f"{out_path} exists; pass --force to overwrite")
+    for other in (args.source, args.base):
+        if _same_file(out_path, other):
+            raise UsageError(f"refusing to write the output onto {other}")
+
+    out = build_output(plan, src)
+    findings = validate(out, plan)
+    errors = [finding for finding in findings if finding.level == "error"]
+    if errors:
+        for finding in errors:
+            print(f"pf2opn: error: {finding.message}", file=sys.stderr)
+        return 1
+
+    write_output(out, out_path)
+    report_path = _report_path(args.output, args.report)
+    report_path.write_text(render_report(plan, findings, src, out_path), encoding="utf-8")
+    return 0
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
@@ -137,9 +226,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return handler(args)
     except UsageError as exc:
-        print(f"pf2opn: {exc}", file=sys.stderr)
-        return 2
-    except NotImplementedError as exc:
         print(f"pf2opn: {exc}", file=sys.stderr)
         return 2
 

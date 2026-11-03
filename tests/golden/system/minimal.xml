@@ -1,0 +1,24 @@
+<golden>
+  <placement path="system/hostname" mode="set">pfbox</placement>
+  <placement path="system/domain" mode="set">example.test</placement>
+  <placement path="system/timezone" mode="set">Etc/UTC</placement>
+  <placement path="system/timeservers" mode="set">0.pool.ntp.org 1.pool.ntp.org</placement>
+  <placement path="ntpd/ispool" mode="replace">
+    <ispool>0.pool.ntp.org 1.pool.ntp.org</ispool>
+  </placement>
+  <placement path="system/dnsserver" mode="remove"/>
+  <placement path="system" mode="append">
+    <dnsserver>1.1.1.1</dnsserver>
+  </placement>
+  <placement path="system" mode="append">
+    <dnsserver>8.8.8.8</dnsserver>
+  </placement>
+  <placement path="system/dnsallowoverride" mode="set">1</placement>
+  <placement path="system/disablechecksumoffloading" mode="remove"/>
+  <placement path="system/disablesegmentationoffloading" mode="remove"/>
+  <placement path="system/disablelargereceiveoffloading" mode="remove"/>
+  <placement path="system/ipv6allow" mode="remove"/>
+  <placement path="system/ssh/enabled" mode="set">enabled</placement>
+  <placement path="system/ssh/port" mode="set">22</placement>
+  <placement path="system/primaryconsole" mode="set">video</placement>
+</golden>
