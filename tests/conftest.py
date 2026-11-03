@@ -108,6 +108,30 @@ def misc_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def trust_users_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``trust_users.xml``."""
+    return _fixture_plan(
+        "trust_users.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"}
+    )
+
+
+@pytest.fixture
+def wireguard_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``wireguard.xml``."""
+    return _fixture_plan(
+        "wireguard.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"}
+    )
+
+
+@pytest.fixture
+def edge_cases_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``edge_cases.xml``."""
+    return _fixture_plan(
+        "edge_cases.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"}
+    )
+
+
+@pytest.fixture
 def section_placements() -> Callable:
     """Render the default-selected, migratable items of one section (§16.2)."""
     from pf2opn.context import WriteContext

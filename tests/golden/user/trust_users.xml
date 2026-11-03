@@ -1,0 +1,14 @@
+<golden>
+  <placement path="system" mode="append">
+    <user uuid="30c92412-c8a2-5bda-ac5d-da6f5feb5bbd">
+      <name>alice</name>
+      <descr>Alice &amp; friends</descr>
+      <scope>user</scope>
+      <disabled>0</disabled>
+      <password>$2y$10$alicealicealicealicealicealicealicealicealiceali</password>
+      <authorizedkeys>c3NoLXJzYSBBQUFBQjNOemFDMXljMkVBQUFBREFRQUJBQUFCb3dUZXN0S2V5T25seU5vdFJlYWw=</authorizedkeys>
+      <uid>2000</uid>
+      <priv>page-all,user-shell-access</priv>
+    </user>
+  </placement>
+</golden>

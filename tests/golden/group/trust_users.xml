@@ -1,0 +1,13 @@
+<golden>
+  <placement path="system/group[name='admins']/member" mode="set">0,2000</placement>
+  <placement path="system" mode="append">
+    <group uuid="3fd0f38e-3cef-5aa9-aa3c-3505b7d7b8ea">
+      <name>operators</name>
+      <description>Operators</description>
+      <scope>user</scope>
+      <gid>2001</gid>
+      <member>2000</member>
+      <priv>page-all</priv>
+    </group>
+  </placement>
+</golden>
