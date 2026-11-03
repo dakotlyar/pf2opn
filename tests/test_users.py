@@ -32,6 +32,23 @@ def test_user_uid_collision_reassigned(trust_users_plan) -> None:
     assert any("uid 0" in warning for warning in alice.warnings)
 
 
+def test_non_numeric_uid_is_allocated_without_a_collision_warning() -> None:
+    """An absent/non-numeric uid is not a "uid N already used" collision (§12.1.15)."""
+    pf = etree.fromstring(
+        "<pfsense><system><user><name>eve</name><scope>user</scope>"
+        "<bcrypt-hash>$2y$10$eveeveeveeveeveeveeveeveeveeveeveeveeveeveeveeveeveev</bcrypt-hash>"
+        "<uid>not-a-number</uid></user></system></pfsense>"
+    )
+    base = etree.fromstring(
+        "<opnsense><system><nextuid>2000</nextuid>"
+        "<user><name>root</name><scope>system</scope><uid>0</uid></user></system></opnsense>"
+    )
+    src = types.SimpleNamespace(pf=pf, base=base)
+    item = registry.get("user").discover(src, None)[0]
+    assert item.data["uid"] == 2000
+    assert not any("already used" in warning for warning in item.warnings)
+
+
 def test_user_privileges_filtered(trust_users_plan) -> None:
     _src, plan = trust_users_plan
     alice = _items(plan, "user")["user:alice"]
@@ -55,6 +72,76 @@ def test_groups_discovered(trust_users_plan) -> None:
     groups = _items(plan, "group")
     assert set(groups) == {"group:admins", "group:operators"}
     assert groups["group:operators"].data["members"] == ["alice"]
+
+
+def test_user_scope_admins_group_has_a_distinct_id() -> None:
+    """A user group named ``admins`` is not the system-admins merge (§12.1.15)."""
+    pf = etree.fromstring(
+        "<pfsense><system>"
+        "<user><name>carol</name><scope>user</scope>"
+        "<bcrypt-hash>$2y$10$carolcarolcarolcarolcarolcarolcarolcarolcarolcarol</bcrypt-hash>"
+        "</user>"
+        "<group><name>admins</name><scope>user</scope><gid>2005</gid><member>carol</member></group>"
+        "</system></pfsense>"
+    )
+    base = etree.fromstring(
+        "<opnsense><system><nextgid>2000</nextgid>"
+        "<user><name>root</name><scope>system</scope><uid>0</uid></user>"
+        "<group><name>admins</name><scope>system</scope><gid>1999</gid><member>0</member></group>"
+        "</system></opnsense>"
+    )
+    src = types.SimpleNamespace(pf=pf, base=base)
+    items = registry.get("group").discover(src, None)
+    assert [item.id for item in items] == ["group:user:admins"]
+    # the identity is the group name, so the merge can replace a same-named base group
+    assert registry.get("group").identity(items[0]) == "admins"
+
+
+def test_system_and_user_admins_do_not_collide() -> None:
+    """Both the system-admins merge and a user group named admins coexist."""
+    pf = etree.fromstring(
+        "<pfsense><system>"
+        "<user><name>dave</name><scope>user</scope>"
+        "<bcrypt-hash>$2y$10$davedavedavedavedavedavedavedavedavedavedavedaveda</bcrypt-hash>"
+        "</user>"
+        "<group><name>admins</name><scope>system</scope><gid>1999</gid>"
+        "<member>admin</member><member>dave</member></group>"
+        "<group><name>admins</name><scope>user</scope><gid>2007</gid><member>dave</member></group>"
+        "</system></pfsense>"
+    )
+    base = etree.fromstring(
+        "<opnsense><system><nextgid>2000</nextgid>"
+        "<user><name>root</name><scope>system</scope><uid>0</uid></user>"
+        "<group><name>admins</name><scope>system</scope><gid>1999</gid><member>0</member></group>"
+        "</system></opnsense>"
+    )
+    src = types.SimpleNamespace(pf=pf, base=base)
+    items = registry.get("group").discover(src, None)
+    ids = [item.id for item in items]
+    assert ids == ["group:admins", "group:user:admins"]
+    assert len(set(ids)) == len(ids)
+
+
+def test_gid_collision_reassigned() -> None:
+    """A pfSense gid already used in the base is reallocated (§12.1.15)."""
+    pf = etree.fromstring(
+        "<pfsense><system>"
+        "<user><name>bob</name><scope>user</scope>"
+        "<bcrypt-hash>$2y$10$bobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbobbo</bcrypt-hash>"
+        "</user>"
+        "<group><name>ops</name><scope>user</scope><gid>1999</gid><member>bob</member></group>"
+        "</system></pfsense>"
+    )
+    base = etree.fromstring(
+        "<opnsense><system><nextgid>2000</nextgid>"
+        "<user><name>root</name><scope>system</scope><uid>0</uid></user>"
+        "<group><name>admins</name><scope>system</scope><gid>1999</gid><member>0</member></group>"
+        "</system></opnsense>"
+    )
+    src = types.SimpleNamespace(pf=pf, base=base)
+    item = registry.get("group").discover(src, None)[0]
+    assert item.data["gid"] == 2000
+    assert any("gid 1999 already used in the base; assigned 2000" == w for w in item.warnings)
 
 
 # -- rendering --------------------------------------------------------------- #

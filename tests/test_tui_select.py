@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from pathlib import Path
 
@@ -38,6 +39,58 @@ def _cursor(screen: SelectScreen, kind: str, value: str) -> None:
     node = screen._find((kind, value))
     assert node is not None, f"no {kind} node {value!r} in the tree"
     screen._tree.move_cursor(node)
+
+
+async def test_space_does_not_toggle_an_interface_item(
+    pfsense_dir: Path, opnsense_base: Path, tmp_path: Path
+) -> None:
+    """§12.1.2/§15: interface items are read-only in the tree (use the map)."""
+    app = _app(
+        pfsense_dir / "minimal.xml",
+        opnsense_base,
+        tmp_path / "out.xml",
+        map_nic=["em0=igc0", "em1=igc1"],
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = await _goto_select(pilot, app)
+        assert "iface:lan" in app.plan.selected
+        _cursor(screen, "item", "iface:lan")
+        await pilot.pause()
+        before = set(app.plan.selected)
+        await pilot.press("space")
+        await pilot.pause()
+        assert app.plan.selected == before
+        assert "iface:lan" in app.plan.selected
+
+
+async def test_stale_selection_sha_warns_on_load(
+    pfsense_dir: Path, opnsense_base: Path, tmp_path: Path
+) -> None:
+    """README §9: a loaded selection whose hash no longer matches warns."""
+    selection = tmp_path / "sel.json"
+    selection.write_text(
+        json.dumps(
+            {
+                "pf2opn_selection": 1,
+                "source_sha256": "deadbeef",
+                "selected": [],
+                "deselected": [],
+                "options": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = _app(
+        pfsense_dir / "minimal.xml",
+        opnsense_base,
+        tmp_path / "out.xml",
+        selection=str(selection),
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.selection_sha_mismatch is True
+        summary = str(app.screen.query_one("#load-summary", Static).content)
+        assert "source_sha256 does not match" in summary
 
 
 async def test_toggle_item(pfsense_dir: Path, opnsense_base: Path, tmp_path: Path) -> None:

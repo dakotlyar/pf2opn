@@ -19,14 +19,26 @@ from .base import Translator, pf_text
 
 
 def _nonempty(el: etree._Element | None) -> bool:
-    return el is not None and (len(el) > 0 or bool((el.text or "").strip()))
+    """True when *el* has non-whitespace text, or a child that is itself non-empty.
+
+    §12.4: a present-but-empty child does not count — ``<pfblockerng/>`` and
+    ``<snmpd><syslocation/></snmpd>`` are not non-empty and must not raise an item.
+    """
+    if el is None:
+        return False
+    if (el.text or "").strip():
+        return True
+    return any(_nonempty(child) for child in el if isinstance(child.tag, str))
 
 
 def _packages(pf: etree._Element, prefix: str) -> bool:
     container = pf.find("installedpackages")
     if container is None:
         return False
-    return any(isinstance(child.tag, str) and child.tag.startswith(prefix) for child in container)
+    return any(
+        isinstance(child.tag, str) and child.tag.startswith(prefix) and _nonempty(child)
+        for child in container
+    )
 
 
 def _l2tp_on(pf: etree._Element) -> bool:
@@ -38,7 +50,11 @@ def _snmpd(pf: etree._Element) -> bool:
     snmpd = pf.find("snmpd")
     if snmpd is None:
         return False
-    return any(snmpd.find(tag) is not None for tag in ("syslocation", "syscontact", "rocommunity", "enable"))
+    # §12.4: the child must carry content — an empty <syslocation/> does not count.
+    return any(
+        _nonempty(snmpd.find(tag))
+        for tag in ("syslocation", "syscontact", "rocommunity", "enable")
+    )
 
 
 def _shaper(pf: etree._Element) -> bool:
@@ -47,16 +63,15 @@ def _shaper(pf: etree._Element) -> bool:
 
 def _ipsec(pf: etree._Element) -> bool:
     return (
-        bool(pf.findall("ipsec/phase1"))
-        or pf.find("ipsec/mobilekey") is not None
-        or pf.find("ipsec/client") is not None
+        any(_nonempty(phase1) for phase1 in pf.findall("ipsec/phase1"))
+        or _nonempty(pf.find("ipsec/mobilekey"))
+        or _nonempty(pf.find("ipsec/client"))
     )
 
 
 def _openvpn(pf: etree._Element) -> bool:
-    return (
-        pf.find("openvpn/openvpn-server") is not None
-        or pf.find("openvpn/openvpn-client") is not None
+    return _nonempty(pf.find("openvpn/openvpn-server")) or _nonempty(
+        pf.find("openvpn/openvpn-client")
     )
 
 
@@ -78,7 +93,8 @@ _CATALOGUE: tuple[tuple[str, str, Callable[[etree._Element], bool], str], ...] =
      "must be rebuilt"),
     ("suricata", "Suricata", lambda pf: _packages(pf, "suricata"),
      "OPNsense Suricata uses a different config model; reconfigure"),
-    ("captiveportal", "Captive portal", lambda pf: bool(pf.findall("captiveportal/*")),
+    ("captiveportal", "Captive portal",
+     lambda pf: any(_nonempty(child) for child in pf.findall("captiveportal/*")),
      "OPNsense captive portal uses a different zone/template model; rebuild"),
     ("ntopng", "ntopng", lambda pf: _packages(pf, "ntopng"),
      "install os-ntopng and reconfigure"),

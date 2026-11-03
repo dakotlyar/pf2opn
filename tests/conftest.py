@@ -35,6 +35,12 @@ def opnsense_base() -> Path:
     return OPNSENSE_DIR / "base_26_7.xml"
 
 
+@pytest.fixture(scope="session")
+def opnsense_wg_base() -> Path:
+    """A base OPNsense config that already has WireGuard servers and clients."""
+    return OPNSENSE_DIR / "base_wg.xml"
+
+
 @pytest.fixture
 def minimal_path(pfsense_dir: Path) -> Path:
     return pfsense_dir / "minimal.xml"

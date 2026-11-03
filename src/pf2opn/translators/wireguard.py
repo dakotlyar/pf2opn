@@ -98,18 +98,25 @@ def _unique(base: str, used: set[str]) -> str:
     return name
 
 
-def _base_server_names(base: etree._Element) -> set[str]:
-    return {
-        (server.findtext("name") or "").strip()
-        for server in base.findall("OPNsense/wireguard/server/servers/server")
-    }
+def _base_server_instances(base: etree._Element) -> tuple[set[int], dict[str, int]]:
+    """Base WireGuard ``(instances in use, instance of each named server)``.
 
-
-def _base_client_names(base: etree._Element) -> set[str]:
-    return {
-        (client.findtext("name") or "").strip()
-        for client in base.findall("OPNsense/wireguard/client/clients/client")
-    }
+    A base server whose ``name`` equals a tunnel's output name is a prior pf2opn
+    output of that same tunnel: its instance is reused so a re-run is a no-op
+    instead of allocating a fresh instance each time (§12.1.17).
+    """
+    instances: set[int] = set()
+    by_name: dict[str, int] = {}
+    for server in base.findall("OPNsense/wireguard/server/servers/server"):
+        text = (server.findtext("instance") or "").strip()
+        if not text.isdigit():
+            continue
+        value = int(text)
+        instances.add(value)
+        name = (server.findtext("name") or "").strip()
+        if name:
+            by_name.setdefault(name, value)
+    return instances, by_name
 
 
 # --------------------------------------------------------------------------- #
@@ -132,14 +139,14 @@ class WgTunnelTranslator(Translator):
             return []
         peers = src.pf.findall("installedpackages/wireguard/peers/item")
 
-        used_instances = {
-            int(instance.text)
-            for instance in src.base.findall("OPNsense/wireguard/server/servers/server/instance")
-            if (instance.text or "").strip().isdigit()
-        }
-        used_names = _base_server_names(src.base)
+        base_instances, base_instance_by_name = _base_server_instances(src.base)
 
         items: list[Item] = []
+        #: Names assigned within this migration only — never seeded from the base,
+        #: so a base name collision is the entry being replaced, not a rename.
+        used_names: set[str] = set()
+        #: Instances assigned within this migration (guards an intra-migration clash).
+        assigned_instances: set[int] = set()
         for index, tunnel in enumerate(tunnels):
             name = pf_text(tunnel, "name")
             descr = pf_desc(tunnel)
@@ -148,14 +155,36 @@ class WgTunnelTranslator(Translator):
             warnings: list[str] = []
             followups: list[str] = []
             match = _TUN_NAME.match(name)
-            instance = int(match.group(1)) if match else 0
-            if instance in used_instances:
-                replacement = max(used_instances or {0}) + 1
-                warnings.append(f"instance {instance} already used in the base; assigned {replacement}")
-                instance = replacement
-            used_instances.add(instance)
+            n = int(match.group(1)) if match else 0
+            out_name = _unique(sanitize_name(descr or name) or f"wg{n}", used_names)
+
+            reused = base_instance_by_name.get(out_name)
+            if reused is not None:
+                # A prior pf2opn output of this tunnel: reuse its instance (§12.1.17).
+                instance = reused
+            else:
+                used = base_instances | assigned_instances
+                if n not in used:
+                    instance = n
+                else:
+                    instance = max(used | {n}) + 1
+                    if n in base_instances:
+                        warnings.append(f"instance {n} already used in the base; assigned {instance}")
+                    else:
+                        warnings.append(
+                            f"instance {n} already used by another tunnel in this migration; "
+                            f"assigned {instance}"
+                        )
+            assigned_instances.add(instance)
+
             if ifmap is not None:
-                ifmap.wg_names[name] = f"wg{instance}"
+                device = f"wg{instance}"
+                ifmap.wg_names[name] = device
+                # Keep the already-built interface target in sync (the report and
+                # TUI read ``opn_device``, not ``wg_names``).
+                for target in ifmap.targets.values():
+                    if target.kind == "wireguard" and target.pf_device == name:
+                        target.opn_device = device
 
             tunnel_address = _tunnel_address(tunnel, src)
             own_peers = [peer for peer in peers if pf_text(peer, "tun") == name]
@@ -180,9 +209,9 @@ class WgTunnelTranslator(Translator):
                 remote: list[str] = []
                 for peer in own_peers:
                     for entry in _split_allowed(pf_text(peer, "allowedips")):
-                        if entry in _DEFAULT_ROUTES or not (
-                            _is_host(entry) and net is not None and _in_net(entry, net)
-                        ):
+                        if entry in _DEFAULT_ROUTES:
+                            continue  # a default route is not a "remote subnet"
+                        if not (_is_host(entry) and net is not None and _in_net(entry, net)):
                             if entry not in remote:
                                 remote.append(entry)
                 warnings.append(
@@ -204,7 +233,7 @@ class WgTunnelTranslator(Translator):
                     deps=[f"iface:{ifkey}"] if ifkey else [],
                     data={
                         "instance": instance,
-                        "name": _unique(sanitize_name(descr or name) or f"wg{instance}", used_names),
+                        "name": out_name,
                         "tunneladdress": tunnel_address,
                         "disableroutes": disableroutes,
                         "gateway": gateway,
@@ -223,14 +252,18 @@ class WgTunnelTranslator(Translator):
         return ""
 
     def identity(self, item: Item) -> str | None:
-        """Tunnel identity key: the instance (base ``server``) or its number."""
+        """Tunnel identity key: the *output* instance (§12.1.17).
+
+        A base ``server`` identifies by its own ``instance``; a source item by the
+        instance it will be written with, so the merge can only remove a base
+        server this run actually replaces.
+        """
         if item.source is None:
             return None
-        instance = pf_text(item.source, "instance")
-        if instance:
-            return instance
-        match = _TUN_NAME.match(pf_text(item.source, "name"))
-        return match.group(1) if match else None
+        if item.source.tag == "server":
+            return pf_text(item.source, "instance") or None
+        instance = item.data.get("instance")
+        return str(instance) if instance is not None else None
 
     def render(self, item: Item, ctx: WriteContext) -> list[Placement]:
         tunnel = item.source
@@ -291,7 +324,10 @@ class WgPeerTranslator(Translator):
             pf_text(tunnel, "name"): tunnel
             for tunnel in src.pf.findall("installedpackages/wireguard/tunnels/item")
         }
-        used_names = _base_client_names(src.base)
+        #: Peer names are uniquified within this migration only — never seeded
+        #: from base client names, so a base name collision is a merge-replace
+        #: (the identity is that name), not a ``_2`` rename (§12.1.17).
+        used_names: set[str] = set()
 
         items: list[Item] = []
         for index, peer in enumerate(peers):

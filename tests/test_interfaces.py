@@ -32,6 +32,14 @@ def test_interfaces_statuses_and_deps(interfaces_vlans_plan) -> None:
     assert "not migrated" in items["iface:opt3"].reason
 
 
+def test_every_interface_item_is_readonly(interfaces_vlans_plan) -> None:
+    """§12.1.2/§15: interfaces are selected only on the interface-map screen."""
+    _src, plan = interfaces_vlans_plan
+    items = [item for item in plan.items if item.section == "interfaces"]
+    assert items
+    assert all(item.readonly_selection for item in items)
+
+
 def test_interfaces_golden(interfaces_vlans_plan, golden_checker, wrap_placements) -> None:
     src, plan = interfaces_vlans_plan
     translator = registry.get("interfaces")

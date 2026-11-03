@@ -42,6 +42,47 @@ def test_snmpd_detector_ignores_a_bare_section() -> None:
     assert "unsup:snmpd" not in {item.id for item in _discover("<pfsense><snmpd/></pfsense>")}
 
 
+def test_empty_child_does_not_raise_an_item() -> None:
+    """§12.4: a present-but-empty child is not non-empty."""
+    assert "unsup:pfblockerng" not in {
+        item.id
+        for item in _discover(
+            "<pfsense><installedpackages><pfblockerng/></installedpackages></pfsense>"
+        )
+    }
+    assert "unsup:pfblockerng" not in {
+        item.id
+        for item in _discover(
+            "<pfsense><installedpackages><pfblockerng><config/></pfblockerng>"
+            "</installedpackages></pfsense>"
+        )
+    }
+    assert "unsup:snmpd" not in {
+        item.id
+        for item in _discover("<pfsense><snmpd><syslocation/></snmpd></pfsense>")
+    }
+    assert "unsup:shellcmd" not in {
+        item.id for item in _discover("<pfsense><system><earlyshellcmd/></system></pfsense>")
+    }
+    assert "unsup:ipsec" not in {
+        item.id for item in _discover("<pfsense><ipsec><mobilekey/></ipsec></pfsense>")
+    }
+
+
+def test_nonempty_child_still_raises_an_item() -> None:
+    assert "unsup:pfblockerng" in {
+        item.id
+        for item in _discover(
+            "<pfsense><installedpackages><pfblockerng><config><dnsbl>on</dnsbl>"
+            "</config></pfblockerng></installedpackages></pfsense>"
+        )
+    }
+    assert "unsup:snmpd" in {
+        item.id
+        for item in _discover("<pfsense><snmpd><syslocation>rack</syslocation></snmpd></pfsense>")
+    }
+
+
 def test_ipsec_detector_needs_content() -> None:
     assert "unsup:ipsec" not in {item.id for item in _discover("<pfsense><ipsec/></pfsense>")}
 

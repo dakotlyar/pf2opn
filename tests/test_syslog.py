@@ -9,6 +9,7 @@ from lxml import etree
 from pf2opn import registry
 from pf2opn.context import WriteContext
 from pf2opn.model import Mode, Status
+from pf2opn.translators.syslog import split_host_port
 
 
 def _items(plan, section):
@@ -54,6 +55,29 @@ def test_disabled_or_empty_remotes_are_skipped() -> None:
     )
     src = types.SimpleNamespace(pf=pf)
     assert registry.get("syslog").discover(src, None) == []
+
+
+def test_split_host_port_shapes() -> None:
+    """§12.1.19: shape-based split, so an IPv6 literal is not cut at the first colon."""
+    assert split_host_port("::1") == ("::1", "514")
+    assert split_host_port("2001:db8::514") == ("2001:db8::514", "514")
+    assert split_host_port("[::1]:51820") == ("::1", "51820")
+    assert split_host_port("[2001:db8::1]") == ("2001:db8::1", "514")
+    assert split_host_port("logs.example.test:5514") == ("logs.example.test", "5514")
+    assert split_host_port("192.0.2.1") == ("192.0.2.1", "514")
+    assert split_host_port("host") == ("host", "514")
+
+
+def test_bare_ipv6_hostname_is_written_whole() -> None:
+    pf = etree.fromstring(
+        "<pfsense><syslog><enable></enable><remoteserver>::1</remoteserver></syslog></pfsense>"
+    )
+    src = types.SimpleNamespace(pf=pf)
+    item = registry.get("syslog").discover(src, None)[0]
+    ctx = types.SimpleNamespace(uuid=lambda item_id, suffix="": f"uuid:{item_id}")
+    root = registry.get("syslog").render(item, ctx)[0].element
+    assert root.findtext("hostname") == "::1"
+    assert root.findtext("port") == "514"
 
 
 def test_syslog_golden(misc_plan, golden_checker, section_placements, wrap_placements) -> None:

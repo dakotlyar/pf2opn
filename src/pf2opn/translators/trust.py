@@ -59,7 +59,7 @@ def check_crt(crt: str) -> tuple[str | None, str | None, str | None]:
     so a bundle with several ``BEGIN CERTIFICATE`` blocks is trimmed to the leaf.
     """
     if not crt:
-        return "", None, None
+        return None, None, "certificate data is empty"
     decoded = _decode_base64(crt)
     if decoded is None:
         return None, None, "certificate data could not be decoded"

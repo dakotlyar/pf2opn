@@ -70,6 +70,8 @@ class IfaceMapScreen(AppScreen):
         ("space", "toggle_include", "Toggle"),
         ("c", "continue_", "Continue"),
         ("enter", "pick_nic", "Pick NIC"),
+        ("b", "back", "Back"),
+        ("escape", "back", "Back"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -193,3 +195,7 @@ class IfaceMapScreen(AppScreen):
         footer.update("")
         self.pfapp.rebuild_plan()
         self.pfapp.show_select()
+
+    def action_back(self) -> None:
+        # §15: Esc/b goes back one screen (to Load when reached from there).
+        self.app.pop_screen()

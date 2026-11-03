@@ -59,6 +59,53 @@ def test_e2e_migrate_minimal(tmp_path: Path, minimal_path: Path, opnsense_base: 
     assert [f for f in validate(reparsed, plan) if f.level == "error"] == []
 
 
+def test_unwritable_output_exits_2(
+    tmp_path: Path, minimal_path: Path, opnsense_base: Path, capsys
+) -> None:
+    """A missing output directory is a clean usage error, not a traceback (§9)."""
+    out = tmp_path / "missing" / "out.xml"
+    code = cli.main(
+        [
+            "migrate",
+            str(minimal_path),
+            "--base",
+            str(opnsense_base),
+            "-o",
+            str(out),
+            "--select-all-ok",
+        ]
+    )
+    assert code == 2
+    assert not out.exists()
+    assert "cannot write" in capsys.readouterr().err
+
+
+def test_unwritable_report_leaves_nothing(
+    tmp_path: Path, minimal_path: Path, opnsense_base: Path, capsys
+) -> None:
+    """An unwritable report path fails before the config is written (§9)."""
+    out = tmp_path / "out.xml"
+    report = tmp_path / "missing" / "report.md"
+    code = cli.main(
+        [
+            "migrate",
+            str(minimal_path),
+            "--base",
+            str(opnsense_base),
+            "-o",
+            str(out),
+            "--select-all-ok",
+            "--report",
+            str(report),
+        ]
+    )
+    assert code == 2
+    assert not out.exists()
+    assert not report.exists()
+    assert not (tmp_path / "out.report.md").exists()
+    assert "cannot write report" in capsys.readouterr().err
+
+
 def test_e2e_refuses_to_overwrite(tmp_path: Path, minimal_path: Path, opnsense_base: Path) -> None:
     out = tmp_path / "out.xml"
     out.write_text("<existing/>", encoding="utf-8")

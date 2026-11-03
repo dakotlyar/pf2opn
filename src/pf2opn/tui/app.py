@@ -68,6 +68,13 @@ class Pf2OpnApp(App[None]):
         if self.selection_path is not None and self.selection_path.exists():
             self.loaded_selection = load_selection(self.selection_path)
 
+        #: A loaded selection whose source hash no longer matches (README §9).
+        self.selection_sha_mismatch = bool(
+            self.loaded_selection is not None
+            and self.loaded_selection.source_sha256
+            and self.loaded_selection.source_sha256 != src.source_sha256
+        )
+
         nic_map: dict[str, str] = {}
         if self.loaded_selection is not None:
             nic_map.update(self.loaded_selection.nic_map)
@@ -101,6 +108,11 @@ class Pf2OpnApp(App[None]):
 
     def on_mount(self) -> None:
         self.push_screen(LoadScreen())
+        if self.selection_sha_mismatch:
+            self.notify(
+                "the loaded selection's source_sha256 does not match the source file",
+                severity="warning",
+            )
 
     def show_select(self) -> None:
         """Open the select screen (imported lazily so the shell stays decoupled)."""

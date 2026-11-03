@@ -30,6 +30,29 @@ _LOCAL_TOGGLES = (
 )
 
 
+def split_host_port(value: str) -> tuple[str, str]:
+    """Split a remote-server value into ``(hostname, port)`` by shape (§12.1.19).
+
+    Splitting on the first ``:`` mangles an IPv6 literal (``::1`` becomes an empty
+    hostname), so the rule is shape-based:
+    ``[v6]`` / ``[v6]:port`` -> the brackets hold the hostname (dropped);
+    a bare IPv6 literal (two or more colons, unbracketed) is the whole hostname
+    with port ``514``; otherwise ``host:port`` / ``host``.
+    """
+    text = (value or "").strip()
+    if text.startswith("["):
+        end = text.find("]")
+        if end != -1:
+            hostname = text[1:end]
+            rest = text[end + 1 :]
+            port = rest[1:] if rest.startswith(":") else ""
+            return hostname, port or "514"
+    if text.count(":") >= 2:
+        return text, "514"
+    hostname, _, port = text.partition(":")
+    return hostname, port or "514"
+
+
 @register
 class SyslogTranslator(Translator):
     section = "syslog"
@@ -77,13 +100,12 @@ class SyslogTranslator(Translator):
         syslog = item.source
         if syslog is None or item.id == "syslog:local":
             return []
-        value = item.data["value"]
-        hostname, _, port = value.partition(":")
+        hostname, port = split_host_port(item.data["value"])
         root = E("destination", uuid=ctx.uuid(item.id))
         sub(root, "enabled", "1")
         sub(root, "transport", "udp6" if pf_text(syslog, "ipproto") == "ipv6" else "udp4")
         sub(root, "hostname", hostname)
-        sub(root, "port", port or "514")
+        sub(root, "port", port)
         sub(root, "level", "")
         sub(root, "facility", "")
         sub(root, "program", "")

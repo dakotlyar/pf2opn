@@ -165,7 +165,10 @@ dependents is an error (exit 2).
 * **The output config naturally contains secrets** (it is a firewall config), so it
   is written atomically with mode **`0600`**.
 * The Markdown report is built only from item labels, reasons, warnings,
-  follow-ups and counts — it contains no XML and no secret values.
+  follow-ups and counts — it contains no XML and no secret values. It is written
+  with the process's normal file mode (`0644` under the default umask), not the
+  config's `0600`; that is deliberate, so a reviewer or diff tool can read it
+  without the config's permissions.
 
 ## Import-test before you trust it
 

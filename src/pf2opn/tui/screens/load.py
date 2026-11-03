@@ -80,6 +80,12 @@ class LoadScreen(AppScreen):
             lines.append("")
             lines.append("Base version warnings:")
             lines.extend(f"  - {warning}" for warning in problems)
+        if self.pfapp.selection_sha_mismatch:
+            lines.append("")
+            lines.append("Selection warning:")
+            lines.append(
+                "  - the loaded selection's source_sha256 does not match the source file"
+            )
         lines.append("")
         lines.append("Press [b]enter[/b] to continue to the interface map.")
         return "\n".join(lines)

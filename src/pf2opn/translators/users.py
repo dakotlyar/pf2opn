@@ -40,7 +40,12 @@ def _base_gids(base: etree._Element) -> set[int]:
 
 
 def _next_free(raw: str, allocated: set[int], floor: int) -> tuple[int, bool]:
-    """Return ``(uid, collided)``: keep *raw* or allocate above *floor*."""
+    """Return ``(id, collided)``: keep *raw* or allocate above *floor*.
+
+    *collided* is true only for a real collision: a *numeric* *raw* that is
+    already in use. An absent/non-numeric id is allocated silently, so the
+    caller must not warn "N already used" for one.
+    """
     if raw.isdigit() and int(raw) not in allocated:
         value = int(raw)
         allocated.add(value)
@@ -49,7 +54,7 @@ def _next_free(raw: str, allocated: set[int], floor: int) -> tuple[int, bool]:
     while candidate in allocated:
         candidate += 1
     allocated.add(candidate)
-    return candidate, bool(raw)
+    return candidate, raw.isdigit()
 
 
 def _split_privs(user: etree._Element) -> tuple[str, list[str]]:
@@ -178,6 +183,18 @@ def _user_names(pf: etree._Element) -> set[str]:
     }
 
 
+def _group_id(name: str, scope: str) -> str:
+    """A group item id, distinct from the special system-admins merge.
+
+    The system ``admins`` merge uses the id ``group:admins`` (§12.1.15); a
+    *user-scope* group of the same name is a different group and must not be
+    misclassified as that merge, so its id is scope-qualified.
+    """
+    if name == "admins" and scope != "system":
+        return "group:user:admins"
+    return f"group:{name}"
+
+
 @register
 class GroupTranslator(Translator):
     section = "group"
@@ -189,6 +206,8 @@ class GroupTranslator(Translator):
 
     def discover(self, src: SourceContext, ifmap: IfaceMap) -> list[Item]:
         pf_users = _user_names(src.pf)
+        allocated_gids = _base_gids(src.base) | {0}
+        nextgid = int(pf_text(src.base, "system/nextgid") or 0)
         items: list[Item] = []
         for group in src.pf.findall("system/group"):
             name = pf_text(group, "name")
@@ -215,15 +234,24 @@ class GroupTranslator(Translator):
             priv, dropped = _split_privs(group)
             if dropped:
                 warnings.append("privileges not migrated: " + ", ".join(dropped))
+            gid, gid_collided = _next_free(pf_text(group, "gid"), allocated_gids, nextgid)
+            if gid_collided:
+                warnings.append(
+                    f"gid {pf_text(group, 'gid')} already used in the base; assigned {gid}"
+                )
             items.append(
                 Item(
-                    f"group:{name}",
+                    _group_id(name, scope),
                     self.section,
                     f"Group {name}",
                     group,
                     Status.PARTIAL if warnings else Status.OK,
                     warnings=warnings,
-                    data={"members": pf_list(group, "member"), "priv": priv},
+                    data={
+                        "members": pf_list(group, "member"),
+                        "priv": priv,
+                        "gid": gid,
+                    },
                 )
             )
         return items
@@ -259,7 +287,7 @@ class GroupTranslator(Translator):
         sub(root, "name", pf_text(group, "name"))
         sub(root, "description", pf_desc(group, "description"))
         sub(root, "scope", "user")
-        sub(root, "gid", pf_text(group, "gid"))
+        sub(root, "gid", str(item.data["gid"]))
         uids = self._member_uids(item.data["members"], ctx)
         sub(root, "member", ",".join(uids) if uids else "0")
         if item.data["priv"]:
@@ -290,9 +318,9 @@ class GroupTranslator(Translator):
     def finalize(self, selected: list[Item], ctx: WriteContext) -> list[Placement]:
         base = ctx.src.base
         gids = [
-            int(pf_text(item.source, "gid"))
+            int(item.data["gid"])
             for item in selected
-            if item.id != "group:admins" and pf_text(item.source, "gid").isdigit()
+            if item.id != "group:admins" and item.data.get("gid") is not None
         ]
         floor = max([0, *_base_gids(base), *gids])
         nextgid = max(int(pf_text(base, "system/nextgid") or 0), floor + 1)

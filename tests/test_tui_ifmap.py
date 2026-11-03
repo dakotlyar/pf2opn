@@ -11,6 +11,7 @@ from pf2opn.context import SourceContext
 from pf2opn.ifmap import validate_ifmap
 from pf2opn.tui.app import Pf2OpnApp
 from pf2opn.tui.screens.ifmap import IfaceMapScreen, NicPickerModal
+from pf2opn.tui.screens.load import LoadScreen
 
 
 def _app(fixture: Path, base: Path, output: Path, *, map_nic=()) -> Pf2OpnApp:
@@ -116,6 +117,25 @@ async def test_space_toggles_include(
         await pilot.pause()
         assert app.ifmap.targets["opt1"].include is False
         assert table.get_row("opt1")[0] == "[ ]"
+
+
+async def test_back_returns_to_load(
+    pfsense_dir: Path, opnsense_base: Path, tmp_path: Path
+) -> None:
+    """§15: ``b`` / ``Esc`` goes back one screen (to Load)."""
+    app = _app(pfsense_dir / "minimal.xml", opnsense_base, tmp_path / "out.xml")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _goto_ifmap(pilot, app)
+        await pilot.press("b")
+        await pilot.pause()
+        assert isinstance(app.screen, LoadScreen)
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, IfaceMapScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, LoadScreen)
 
 
 async def test_space_refused_for_unsupported_device(

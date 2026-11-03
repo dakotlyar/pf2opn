@@ -72,6 +72,7 @@ class InterfacesTranslator(Translator):
                         pf_iface.el,
                         Status.UNSUPPORTED,
                         reason=f"device type {pf_iface.device} is not migrated in v1",
+                        readonly_selection=True,
                     )
                 )
                 continue
@@ -84,6 +85,7 @@ class InterfacesTranslator(Translator):
                         pf_iface.el,
                         Status.UNSUPPORTED,
                         reason="NIC not mapped",
+                        readonly_selection=True,
                     )
                 )
                 continue
@@ -109,6 +111,9 @@ class InterfacesTranslator(Translator):
                     Status.PARTIAL if warnings else Status.OK,
                     warnings=warnings,
                     deps=deps,
+                    # §12.1.2/§15: interface selection is edited only on the
+                    # interface-map screen; the TUI uses this flag to refuse space.
+                    readonly_selection=True,
                 )
             )
         return items

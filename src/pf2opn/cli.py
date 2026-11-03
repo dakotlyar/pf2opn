@@ -42,7 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
     migrate.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
     migrate.add_argument("-o", "--output", required=True, metavar="OUT", help="output config.xml")
-    migrate.add_argument("--report", metavar="REPORT", help="report path (default: OUT.report.md)")
+    migrate.add_argument(
+        "--report",
+        metavar="REPORT",
+        help="report path (default: OUT with its suffix replaced by .report.md, "
+        "e.g. out.xml -> out.report.md)",
+    )
     selection = migrate.add_mutually_exclusive_group(required=True)
     selection.add_argument("--select-all-ok", action="store_true", help="select every default item")
     selection.add_argument("--selection", metavar="FILE", help="selection JSON to load")
@@ -60,7 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     tui.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
     tui.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
     tui.add_argument("-o", "--output", required=True, metavar="OUT", help="output config.xml")
-    tui.add_argument("--report", metavar="REPORT", help="report path (default: OUT.report.md)")
+    tui.add_argument(
+        "--report",
+        metavar="REPORT",
+        help="report path (default: OUT with its suffix replaced by .report.md, "
+        "e.g. out.xml -> out.report.md)",
+    )
     tui.add_argument("--selection", metavar="FILE", help="selection JSON to load/save")
     tui.add_argument("--force", action="store_true", help="overwrite an existing OUT")
 
@@ -152,6 +162,31 @@ def _report_path(output: str, report: str | None) -> Path:
     return out.with_name(out.stem + ".report.md")
 
 
+def _ensure_report_writable(report_path: Path) -> None:
+    """Raise :class:`UsageError` unless *report_path* can be written.
+
+    The report is rendered from the written output, so it is written *after* the
+    config; checking it first means an unwritable report path fails (exit 2)
+    before the config is touched, instead of leaving a written config behind.
+    """
+    try:
+        if report_path.exists():
+            if report_path.is_dir():
+                raise IsADirectoryError(f"is a directory: {report_path}")
+            if not os.access(report_path, os.W_OK):
+                raise PermissionError(f"permission denied: {report_path}")
+            return
+        parent = report_path.parent
+        if not parent.exists():
+            raise FileNotFoundError(f"no such directory: {parent}")
+        probe = parent / f".pf2opn-report-{os.getpid()}.tmp"
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(fd)
+        probe.unlink()
+    except OSError as exc:
+        raise UsageError(f"cannot write report {report_path}: {exc}") from exc
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     src = _load_source(args.source, args.base)
 
@@ -195,6 +230,8 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     for other in (args.source, args.base):
         if _same_file(out_path, other):
             raise UsageError(f"refusing to write the output onto {other}")
+    if not out_path.parent.exists():
+        raise UsageError(f"cannot write {out_path}: no such directory: {out_path.parent}")
 
     out = build_output(plan, src)
     findings = validate(out, plan)
@@ -204,8 +241,15 @@ def cmd_migrate(args: argparse.Namespace) -> int:
             print(f"pf2opn: error: {finding.message}", file=sys.stderr)
         return 1
 
-    write_output(out, out_path)
+    # Validate the report path before writing the config: a report failure must
+    # not leave a written config behind (README exit-1 = "nothing written").
     report_path = _report_path(args.output, args.report)
+    _ensure_report_writable(report_path)
+
+    try:
+        write_output(out, out_path)
+    except OSError as exc:
+        raise UsageError(f"cannot write {out_path}: {exc}") from exc
     report_path.write_text(render_report(plan, findings, src, out_path), encoding="utf-8")
     return 0
 

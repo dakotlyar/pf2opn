@@ -50,6 +50,14 @@ def test_check_crt_rejects_non_pem() -> None:
     assert check_crt(payload)[2] == "no PEM certificate found in certificate data"
 
 
+def test_check_crt_rejects_empty() -> None:
+    """An empty ``crt`` is unusable, not a valid empty certificate."""
+    value, warning, reason = check_crt("")
+    assert value is None
+    assert warning is None
+    assert reason == "certificate data is empty"
+
+
 def test_check_crt_trims_and_reencodes() -> None:
     pem = (
         "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n"

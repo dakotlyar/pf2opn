@@ -144,7 +144,9 @@
 	</cron>
 	<installedpackages>
 		<pfblockerng>
-			<config></config>
+			<config>
+				<dnsbl>synthetic</dnsbl>
+			</config>
 		</pfblockerng>
 		<package>
 			<name>SyntheticPackage</name>

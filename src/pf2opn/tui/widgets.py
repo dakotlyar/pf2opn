@@ -7,6 +7,7 @@ import dataclasses
 from collections.abc import Callable
 
 from lxml import etree
+from textual.app import ComposeResult
 from textual.message import Message
 from textual.widgets import Static, TabbedContent, TabPane, TextArea, Tree
 
@@ -184,24 +185,19 @@ class DetailPane(TabbedContent):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(id="detail", **kwargs)
-        self.titles = [self.render_str(title) for title in ("Source", "Preview", "Notes")]
-        # compose_add_child is TabbedContent's hook for collecting its panes; the
-        # default compose() turns each into a tab pane when the widget mounts.
-        self.compose_add_child(
-            TabPane(
-                "Source",
-                TextArea(id="source", read_only=True, language="xml"),
-                id="tab-source",
-            )
+
+    def compose(self) -> ComposeResult:
+        yield TabPane(
+            "Source",
+            TextArea(id="source", read_only=True, language="xml"),
+            id="tab-source",
         )
-        self.compose_add_child(
-            TabPane(
-                "Preview",
-                TextArea(id="preview", read_only=True, language="xml"),
-                id="tab-preview",
-            )
+        yield TabPane(
+            "Preview",
+            TextArea(id="preview", read_only=True, language="xml"),
+            id="tab-preview",
         )
-        self.compose_add_child(TabPane("Notes", Static(id="notes"), id="tab-notes"))
+        yield TabPane("Notes", Static(id="notes"), id="tab-notes")
 
     def show_item(self, item: Item | None, plan: Plan, src: SourceContext) -> None:
         """Display *item* (or a placeholder when *item* is ``None``)."""
