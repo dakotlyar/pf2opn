@@ -171,3 +171,209 @@ def test_version_mismatch_is_a_warning(minimal_plan) -> None:
     warnings = [finding for finding in findings if finding.level == "warning"]
     assert any("1.0.0" in warning.message and "1.0.6" in warning.message for warning in warnings)
     assert _errors(findings) == []
+
+
+# --------------------------------------------------------------------------- #
+# §13 checks 3, 4, 9, 10 (direct coverage)
+# --------------------------------------------------------------------------- #
+
+
+def test_interface_without_device_is_an_error(minimal_plan) -> None:
+    """§13 check 3: every interfaces/*/if must be non-empty."""
+    _src, plan = minimal_plan
+    out = _el("<opnsense><interfaces><wan><if></if></wan></interfaces></opnsense>")
+    assert any("wan has no device" in f.message for f in _errors(validate(out, plan)))
+
+
+def test_duplicate_interface_device_is_an_error(minimal_plan) -> None:
+    """§13 check 3: devices are unique."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><wan><if>igc0</if></wan>"
+        "<lan><if>igc0</if></lan></interfaces></opnsense>"
+    )
+    assert any(
+        "igc0 is used by more than one interface" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+def test_undefined_vlan_device_is_an_error(minimal_plan) -> None:
+    """§13 check 3: a ``vlan0N`` device must exist in ``vlans/vlan/vlanif``."""
+    _src, plan = minimal_plan
+    out = _el("<opnsense><interfaces><opt1><if>vlan099</if></opt1></interfaces></opnsense>")
+    assert any(
+        "vlan099, which is not a defined VLAN" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+def test_undefined_wireguard_device_is_an_error(minimal_plan) -> None:
+    """§13 check 3: a ``wgN`` device must match a server instance."""
+    _src, plan = minimal_plan
+    out = _el("<opnsense><interfaces><opt1><if>wg9</if></opt1></interfaces></opnsense>")
+    assert any(
+        "wg9, which is not a WireGuard server" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+def test_vlan_parent_not_assigned_is_an_error(minimal_plan) -> None:
+    """§13 check 4: every VLAN parent is an assigned interface or a target NIC."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><wan><if>igc0</if></wan></interfaces>"
+        "<vlans><vlan><vlanif>vlan01</vlanif><if>igcX</if></vlan></vlans></opnsense>"
+    )
+    assert any(
+        "VLAN vlan01 parent igcX is not assigned" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+def test_vlan_parent_assigned_passes(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><wan><if>igc0</if></wan></interfaces>"
+        "<vlans><vlan><vlanif>vlan01</vlanif><if>igc0</if></vlan></vlans></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_wireguard_server_unknown_peer_is_an_error(minimal_plan) -> None:
+    """§13 check 9: every server ``peers`` uuid exists in clients."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><wireguard><server><servers>"
+        "<server><instance>1</instance><name>a</name>"
+        "<peers>ghost-uuid</peers></server>"
+        "</servers></server></wireguard></OPNsense></opnsense>"
+    )
+    assert any(
+        "references unknown peer ghost-uuid" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+def test_unbound_alias_unknown_host_is_an_error(minimal_plan) -> None:
+    """§13 check 10: every Unbound alias ``host`` relation resolves."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><unboundplus><aliases>"
+        "<alias><hostname>al</hostname><domain>example.test</domain>"
+        "<host>missing-uuid</host></alias>"
+        "</aliases></unboundplus></OPNsense></opnsense>"
+    )
+    assert any(
+        "al.example.test references unknown host missing-uuid" in f.message
+        for f in _errors(validate(out, plan))
+    )
+
+
+# --------------------------------------------------------------------------- #
+# M14: actionable messages (§13)
+# --------------------------------------------------------------------------- #
+
+
+def test_filter_rule_error_names_the_rule(minimal_plan) -> None:
+    """§13 check 5: a bad filter reference names the rule, not just the token."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><rules>"
+        "<rule><sequence>30</sequence><description>bad rule</description>"
+        "<interface>GHOST</interface></rule>"
+        "</rules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        "filter rule" in f.message and "sequence 30" in f.message and "GHOST" in f.message
+        for f in errors
+    )
+
+
+def test_nat_rule_error_names_the_rule(minimal_plan) -> None:
+    """§13 check 5: an outbound-NAT reference names the rule's sequence."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><snatrules>"
+        "<rule><sequence>20</sequence><description>pool option rule</description>"
+        "<interface>GHOST</interface></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        "outbound NAT rule" in f.message and "sequence 20" in f.message and "GHOST" in f.message
+        for f in errors
+    )
+
+
+def test_duplicate_reservation_names_ip_and_both_macs(minimal_plan) -> None:
+    """§13 check 8: the real-config conflict must name the IP and both MACs."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><lan><if>igc1</if>"
+        "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
+        "<dnsmasq><hosts>"
+        '<hosts uuid="h1"><ip>192.168.1.10</ip>'
+        "<hwaddr>aa:bb:cc:dd:ee:01</hwaddr></hosts>"
+        '<hosts uuid="h2"><ip>192.168.1.10</ip>'
+        "<hwaddr>aa:bb:cc:dd:ee:02</hwaddr></hosts>"
+        "</hosts></dnsmasq></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    message = next(f.message for f in errors if "duplicate" in f.message)
+    assert "192.168.1.10" in message
+    assert "aa:bb:cc:dd:ee:01" in message
+    assert "aa:bb:cc:dd:ee:02" in message
+
+
+def test_reservation_outside_subnet_names_ip_and_mac(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><interfaces><lan><if>igc1</if>"
+        "<ipaddr>192.168.1.1</ipaddr><subnet>24</subnet></lan></interfaces>"
+        "<dnsmasq><hosts>"
+        '<hosts uuid="h1"><ip>10.9.9.9</ip>'
+        "<hwaddr>aa:bb:cc:dd:ee:03</hwaddr></hosts>"
+        "</hosts></dnsmasq></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        "10.9.9.9" in f.message and "aa:bb:cc:dd:ee:03" in f.message for f in errors
+    )
+
+
+def test_sanitized_interface_description_is_a_warning(minimal_plan) -> None:
+    """§13 warning: a description changed by sanitizing surfaces as a Finding."""
+    _src, plan = minimal_plan
+    plan.ifmap.targets["lan"].descr = "My LAN"
+    out = _el("<opnsense><interfaces><lan><if>igc1</if></lan></interfaces></opnsense>")
+    findings = validate(out, plan)
+    warnings = [f for f in findings if f.level == "warning"]
+    assert any(
+        "lan" in f.message and "My LAN" in f.message and "sanitized" in f.message
+        for f in warnings
+    )
+
+
+def test_outbound_automatic_with_rules_is_a_warning(minimal_plan) -> None:
+    """§13 warning: automatic outbound mode with source-NAT rules present."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><nat><outbound><mode>automatic</mode></outbound></nat>"
+        "<OPNsense><Firewall><Filter><snatrules><rule><sequence>10</sequence></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    warnings = [f for f in validate(out, plan) if f.level == "warning"]
+    assert any("automatic" in f.message and "inactive" in f.message for f in warnings)
+
+
+def test_outbound_advanced_with_rules_is_not_warned(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><nat><outbound><mode>advanced</mode></outbound></nat>"
+        "<OPNsense><Firewall><Filter><snatrules><rule><sequence>10</sequence></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    warnings = [f for f in validate(out, plan) if f.level == "warning"]
+    assert not any("inactive" in f.message for f in warnings)

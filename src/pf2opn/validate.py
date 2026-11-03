@@ -15,6 +15,7 @@ from lxml import etree
 
 from .model import Plan
 from .translators.aliases import ALIAS_NAME_RE
+from .translators.base import sanitize_ifdescr
 from .versions import MODEL_VERSIONS
 
 _VLAN_DEVICE = re.compile(r"^vlan0\d+$")
@@ -57,7 +58,27 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_unbound(out))
     findings.extend(_check_system_dns_gateways(out))
     findings.extend(_check_versions(out))
+    findings.extend(_check_sanitized_descriptions(out, plan))
+    findings.extend(_check_outbound_mode(out))
     return findings
+
+
+def _rule_ident(rule: etree._Element, kind: str) -> str:
+    """A human-usable label for a filter/NAT rule (never a secret value)."""
+    sequence = (rule.findtext("sequence") or "").strip()
+    descr = (rule.findtext("description") or rule.findtext("descr") or "").strip()
+    bits: list[str] = []
+    if sequence:
+        bits.append(f"sequence {sequence}")
+    if descr:
+        bits.append(f'"{descr[:60]}"')
+    suffix = f" ({', '.join(bits)})" if bits else ""
+    return f"{kind} rule{suffix}"
+
+
+def _mac_of(host: etree._Element) -> str:
+    """The ``hwaddr`` of a Dnsmasq reservation, for actionable messages."""
+    return (host.findtext("hwaddr") or "").strip() or "(no MAC)"
 
 
 def _is_ip_or_cidr(value: str) -> bool:
@@ -189,7 +210,13 @@ def _check_unique_uuids(out: etree._Element) -> list[Finding]:
         if uuid is None:
             continue
         if uuid in seen:
-            findings.append(Finding("error", f"duplicate uuid {uuid}", _path_of(el)))
+            findings.append(
+                Finding(
+                    "error",
+                    f"duplicate uuid {uuid} on element <{el.tag}>",
+                    _path_of(el),
+                )
+            )
         else:
             seen.add(uuid)
     return findings
@@ -311,44 +338,41 @@ def _check_filter_refs(out: etree._Element) -> list[Finding]:
     gateways = _output_gateway_names(out)
     for rule in out.findall("OPNsense/Firewall/Filter/rules/rule"):
         path = _path_of(rule)
+        ident = _rule_ident(rule, "filter")
         raw_interface = (rule.findtext("interface") or "").strip()
         for token in (part.strip() for part in raw_interface.split(",")):
             if token and token not in iface_keys and token not in _VPN_IFACE_TOKENS:
                 findings.append(
-                    Finding("error", f"filter rule references unknown interface {token}", path)
+                    Finding("error", f"{ident}: unknown interface {token}", path)
                 )
         for field in ("source_net", "destination_net"):
             value = (rule.findtext(field) or "").strip()
             for token in (part.strip() for part in value.split(",")):
                 if token and not _net_token_ok(token, iface_keys, aliases):
                     findings.append(
-                        Finding(
-                            "error",
-                            f"filter rule {field} references unknown token {token}",
-                            path,
-                        )
+                        Finding("error", f"{ident}: {field} references unknown token {token}", path)
                     )
         for field in ("source_port", "destination_port"):
             value = (rule.findtext(field) or "").strip()
             if value and not _port_token_ok(value, aliases):
                 findings.append(
-                    Finding("error", f"filter rule {field} is not a valid port {value!r}", path)
+                    Finding("error", f"{ident}: {field} is not a valid port {value!r}", path)
                 )
         gateway = (rule.findtext("gateway") or "").strip()
         if gateway and gateway not in gateways:
             findings.append(
-                Finding("error", f"filter rule uses unknown gateway {gateway}", path)
+                Finding("error", f"{ident}: unknown gateway {gateway}", path)
             )
     return findings
 
 
 def _check_interface_tokens(
-    value: str, iface_keys: set[str], findings: list[Finding], path: str
+    value: str, iface_keys: set[str], findings: list[Finding], path: str, ident: str
 ) -> None:
     for token in (part.strip() for part in value.split(",")):
         if token and token not in iface_keys and token not in _VPN_IFACE_TOKENS:
             findings.append(
-                Finding("error", f"rule references unknown interface {token}", path)
+                Finding("error", f"{ident}: unknown interface {token}", path)
             )
 
 
@@ -359,6 +383,7 @@ def _check_net_fields(
     aliases: set[str],
     findings: list[Finding],
     path: str,
+    ident: str,
 ) -> None:
     for field in fields:
         value = (element.findtext(field) or "").strip()
@@ -367,7 +392,7 @@ def _check_net_fields(
                 findings.append(
                     Finding(
                         "error",
-                        f"rule {field} references unknown token {token}",
+                        f"{ident}: {field} references unknown token {token}",
                         path,
                     )
                 )
@@ -379,12 +404,13 @@ def _check_port_fields(
     aliases: set[str],
     findings: list[Finding],
     path: str,
+    ident: str,
 ) -> None:
     for field in fields:
         value = (element.findtext(field) or "").strip()
         if value and not _port_token_ok(value, aliases):
             findings.append(
-                Finding("error", f"rule {field} is not a valid port {value!r}", path)
+                Finding("error", f"{ident}: {field} is not a valid port {value!r}", path)
             )
 
 
@@ -396,8 +422,9 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
 
     for rule in out.findall("nat/rule"):
         path = _path_of(rule)
+        ident = _rule_ident(rule, "port-forward")
         _check_interface_tokens(
-            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path, ident
         )
         _check_net_fields(
             rule,
@@ -406,15 +433,22 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
             aliases,
             findings,
             path,
+            ident,
         )
         _check_port_fields(
-            rule, ("source/port", "destination/port", "local-port"), aliases, findings, path
+            rule,
+            ("source/port", "destination/port", "local-port"),
+            aliases,
+            findings,
+            path,
+            ident,
         )
 
     for rule in out.findall("OPNsense/Firewall/Filter/snatrules/rule"):
         path = _path_of(rule)
+        ident = _rule_ident(rule, "outbound NAT")
         _check_interface_tokens(
-            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path, ident
         )
         _check_net_fields(
             rule,
@@ -423,6 +457,7 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
             aliases,
             findings,
             path,
+            ident,
         )
         _check_port_fields(
             rule,
@@ -430,12 +465,14 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
             aliases,
             findings,
             path,
+            ident,
         )
 
     for rule in out.findall("OPNsense/Firewall/Filter/onetoone/rule"):
         path = _path_of(rule)
+        ident = _rule_ident(rule, "1:1 NAT")
         _check_interface_tokens(
-            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path, ident
         )
         _check_net_fields(
             rule,
@@ -444,6 +481,7 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
             aliases,
             findings,
             path,
+            ident,
         )
     return findings
 
@@ -539,29 +577,46 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
             )
 
     networks = _interface_networks(out)
-    seen: set[str] = set()
+    #: reservation IP -> the MAC that claimed it first (a duplicate names both).
+    seen: dict[str, str] = {}
     for host in out.findall("dnsmasq/hosts/hosts"):
+        mac = _mac_of(host)
         raw = (host.findtext("ip") or "").strip()
         for ip in (part.strip() for part in raw.split(",")):
             if not ip:
                 continue
             path = _path_of(host)
             if ip in seen:
-                findings.append(Finding("error", f"duplicate Dnsmasq reservation IP {ip}", path))
+                findings.append(
+                    Finding(
+                        "error",
+                        f"duplicate Dnsmasq reservation IP {ip}: "
+                        f"MAC {seen[ip]} and MAC {mac} both claim it",
+                        path,
+                    )
+                )
                 continue
-            seen.add(ip)
+            seen[ip] = mac
             try:
                 address = ipaddress.ip_address(ip)
             except ValueError:
                 findings.append(
-                    Finding("error", f"Dnsmasq reservation IP {ip!r} is invalid", path)
+                    Finding(
+                        "error",
+                        f"Dnsmasq reservation for MAC {mac} has invalid IP {ip!r}",
+                        path,
+                    )
                 )
                 continue
             if networks and not any(address in network for network in networks):
+                iface_list = ", ".join(
+                    sorted({str(network) for network in networks})
+                )
                 findings.append(
                     Finding(
                         "error",
-                        f"Dnsmasq reservation IP {ip} is outside every interface subnet",
+                        f"Dnsmasq reservation IP {ip} (MAC {mac}) is outside every "
+                        f"interface subnet ({iface_list})",
                         path,
                     )
                 )
@@ -579,18 +634,30 @@ def _check_wireguard(out: etree._Element) -> list[Finding]:
     names: set[str] = set()
     for server in servers:
         path = _path_of(server)
+        name = (server.findtext("name") or "").strip()
         instance = (server.findtext("instance") or "").strip()
         if instance in instances:
-            findings.append(Finding("error", f"duplicate WireGuard instance {instance}", path))
+            findings.append(
+                Finding(
+                    "error",
+                    f"duplicate WireGuard instance {instance} (server {name!r})",
+                    path,
+                )
+            )
         instances.add(instance)
-        name = (server.findtext("name") or "").strip()
         if name in names:
-            findings.append(Finding("error", f"duplicate WireGuard server name {name}", path))
+            findings.append(
+                Finding("error", f"duplicate WireGuard server name {name!r}", path)
+            )
         names.add(name)
         for token in (part.strip() for part in (server.findtext("peers") or "").split(",")):
             if token and token not in client_uuids:
                 findings.append(
-                    Finding("error", f"WireGuard server references unknown peer {token}", path)
+                    Finding(
+                        "error",
+                        f"WireGuard server {name!r} references unknown peer {token}",
+                        path,
+                    )
                 )
 
     client_names: set[str] = set()
@@ -598,7 +665,9 @@ def _check_wireguard(out: etree._Element) -> list[Finding]:
         name = (client.findtext("name") or "").strip()
         if name in client_names:
             findings.append(
-                Finding("error", f"duplicate WireGuard peer name {name}", _path_of(client))
+                Finding(
+                    "error", f"duplicate WireGuard peer name {name!r}", _path_of(client)
+                )
             )
         client_names.add(name)
     return findings
@@ -613,10 +682,13 @@ def _check_unbound(out: etree._Element) -> list[Finding]:
     for alias in out.findall("OPNsense/unboundplus/aliases/alias"):
         host = (alias.findtext("host") or "").strip()
         if host and host not in host_uuids:
+            hostname = (alias.findtext("hostname") or "").strip()
+            domain = (alias.findtext("domain") or "").strip()
+            label = f"{hostname}.{domain}".strip(".") or "(unnamed alias)"
             findings.append(
                 Finding(
                     "error",
-                    f"Unbound alias references unknown host {host}",
+                    f"Unbound alias {label} references unknown host {host}",
                     _path_of(alias),
                 )
             )
@@ -639,3 +711,43 @@ def _check_versions(out: etree._Element) -> list[Finding]:
                 )
             )
     return findings
+
+
+def _check_sanitized_descriptions(out: etree._Element, plan: Plan) -> list[Finding]:
+    """§13 warning: an included interface description changed by sanitizing.
+
+    OPNsense's ``IfDescField`` rejects anything outside ``[A-Za-z0-9_]``, so the
+    translator rewrites the pfSense description; the user is told which interface
+    and what the original was.
+    """
+    findings: list[Finding] = []
+    for iface in _interface_elements(out):
+        target = plan.ifmap.targets.get(iface.tag)
+        if target is None or not target.descr:
+            continue
+        if sanitize_ifdescr(target.descr) != target.descr:
+            findings.append(
+                Finding(
+                    "warning",
+                    f'interface {iface.tag} description "{target.descr}" was sanitized '
+                    "for OPNsense",
+                    f"interfaces/{iface.tag}",
+                )
+            )
+    return findings
+
+
+def _check_outbound_mode(out: etree._Element) -> list[Finding]:
+    """§13 warning: ``nat/outbound/mode`` automatic while source-NAT rules exist."""
+    mode = (out.findtext("nat/outbound/mode") or "").strip()
+    rules = out.findall("OPNsense/Firewall/Filter/snatrules/rule")
+    if mode == "automatic" and rules:
+        return [
+            Finding(
+                "warning",
+                f"nat/outbound/mode is 'automatic' while {len(rules)} source NAT rule(s) "
+                "are present; those rules are inactive",
+                "nat/outbound/mode",
+            )
+        ]
+    return []

@@ -254,6 +254,33 @@ async def test_detail_tabs_show_redacted_text(
         assert "Status:" in notes
 
 
+async def test_preview_pane_redacts_root_password(
+    pfsense_dir: Path, opnsense_base: Path, tmp_path: Path
+) -> None:
+    """§11 rule 2: a secret carried as Placement.text must not reach the pane.
+
+    ``system:root_password`` renders a ``SET`` placement whose text is the
+    pfSense admin bcrypt hash; the Preview tab must still redact it.
+    """
+    bcrypt = "$2y$10$abcdefghijklmnopqrstuvwx0123456789abcdefghij"
+    app = _app(
+        pfsense_dir / "minimal.xml",
+        opnsense_base,
+        tmp_path / "out.xml",
+        map_nic=["em0=igc0", "em1=igc1"],
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen = await _goto_select(pilot, app)
+        _cursor(screen, "item", "system:root_password")
+        await pilot.pause()
+
+        source = screen.query_one("#source", TextArea).text
+        preview = screen.query_one("#preview", TextArea).text
+        assert bcrypt not in source
+        assert bcrypt not in preview
+        assert "\u00abredacted" in preview
+
+
 async def test_notes_lists_dependencies(
     pfsense_dir: Path, opnsense_base: Path, tmp_path: Path
 ) -> None:

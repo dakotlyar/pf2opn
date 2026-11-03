@@ -144,7 +144,12 @@ def _preview_text(item: Item, plan: Plan, src: SourceContext) -> str:
         if placement.element is not None:
             node.append(copy.deepcopy(placement.element))
         elif placement.text is not None:
-            node.text = placement.text
+            # Put the text in an element named after the placement's leaf so
+            # redact_element() can see a secret tag (e.g. ``.../password``); a
+            # bare ``<placement>`` element would leak the value (§11 rule 2).
+            leaf = placement.path.rstrip("/").split("/")[-1].split("[", 1)[0]
+            child = etree.SubElement(node, leaf or "value")
+            child.text = placement.text
     return redacted_xml(root)
 
 
