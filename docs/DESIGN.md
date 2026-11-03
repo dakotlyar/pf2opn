@@ -151,6 +151,21 @@ below are written the way they are. Do not "improve" them from memory:
   `value`, `force`); boot is `dhcp_boot` (`filename` Required, `servername`, `address`, `interface`,
   `tag`). There is **no per-interface enable flag** — see §12.1.11. The Kea facts above are kept for
   reference only; nothing in the current design writes them.
+  * The `tag`/`set_tag` fields on `hosts`, `dhcp_options`, `dhcp_boot` and `dhcp_ranges` are
+    `ModelRelationField`s into `dhcp_tags`: they hold the row's **uuid**, not the tag text (§12.1.11).
+  * `Dnsmasq.php::performValidation()` rejects `mode=static` with a non-empty `end_addr` ("Static only
+    accepts a starting address"), and requires a non-empty `end_addr` for a non-static IPv4 range. So
+    `static` names only a static-only subnet (no `range`/`pool`), where `end_addr` is empty.
+    `RangeAddressField` extends `NetworkField` with `NetMaskAllowed=N`, so a bare network address
+    (`192.168.1.0`, no `/mask`) is accepted as `start_addr` (§12.1.11).
+* `Firewall/Filter.xml`: `rules/rule/categories`, `snatrules/rule/categories`,
+  `onetoone/rule/categories` and `rules/rule/overload` are all `ModelRelationField`s (uuid-keyed);
+  `overload` relates to `Firewall/Alias`. `BaseListField::getValidators()` rejects any value not in the
+  field's uuid option list. The legacy converters copy pfSense **names**, which is why §12.1.7/§12.1.9
+  diverge from them.
+* `Firewall/DNat.xml`: `source`/`destination` have `network`/`address` (volatile)/`port`/`not` and **no
+  `any` child**; "any" is the `network` keyword `any` (or empty) (§12.1.8). On the `onetoone` rule,
+  `natreflection` ∈ {`default` (empty), `enable`, `disable`} only — no `purenat` (§12.1.10).
 
 ---
 
@@ -661,8 +676,10 @@ Rules:
 2. The TUI Source and Preview tabs always go through `redacted_xml`.
 3. The report is built only from labels/reasons/warnings/followups and counts.
 4. The output config.xml naturally contains secrets. It's written with mode 0600.
-5. Logging: the root logger gets `RedactingFilter`. While parsing, `xmlio.parse` calls
-   `register_secret(text)` for every SECRET_TAGS text longer than 8 chars.
+5. Logging: `cli.main()` installs the filter on the root logger (`secrets.install_logging_filter()`)
+   **before** it parses any file or builds a plan — the filter must already be attached when
+   `SourceContext.load` starts, or a secret can reach a log during parsing. While parsing, `xmlio.parse`
+   calls `register_secret(text)` for every SECRET_TAGS text longer than 8 chars.
 6. Tests enforce rules 1–3 (§16.4).
 
 ---
@@ -836,10 +853,19 @@ Special cases:
 | `gateway` | pf `gateway` (name); dep `gw:<name>` |
 | `log`,`allowopts`,`nosync`,`nopfsync`,`disablereplyto` | presence → `1` else `0` |
 | `replyto` | pf `reply-to` |
-| `statetimeout`,`max`,`max-src-nodes`,`max-src-conn`,`max-src-states`,`max-src-conn-rate`,`max-src-conn-rates`,`overload`,`adaptivestart`,`adaptiveend`,`tag`,`tagged`,`tcpflags1`,`tcpflags2`,`prio`,`set-prio`,`set-prio-low`,`tos` | copy if non-empty |
-| `categories` | pf `category` (usually a comma list) → copy verbatim |
+| `statetimeout`,`max`,`max-src-nodes`,`max-src-conn`,`max-src-states`,`max-src-conn-rate`,`max-src-conn-rates`,`adaptivestart`,`adaptiveend`,`tag`,`tagged`,`tcpflags1`,`tcpflags2`,`prio`,`set-prio`,`set-prio-low`,`tos` | copy if non-empty |
+| `overload` | pf `overload` names a pfSense alias → write **that alias's uuid** `ctx.uuid("alias:<name>")`, with dep `alias:<name>`. If it isn't an output alias (absent/unselected) → empty + PARTIAL warning. `overload` is a uuid `ModelRelationField` (into `Firewall/Alias`); a bare name would fail OPNsense validation. |
+| `categories` | **dropped**, PARTIAL warning "rule categories not migrated; recreate them under Firewall ▸ Rules ▸ Categories if needed". `categories` is a uuid `ModelRelationField` (into `Firewall/Category`) and pf2opn creates no category rows in v1, so the pfSense names cannot be copied. |
 | `tcpflags_any` | presence → `1` else `0`. (Upstream `list_legacy_rules.php` omits this field; the model has it, so we keep it — golden tests pin the choice.) |
 | `description` | `pf_desc` |
+
+> **`overload` / `categories` diverge from `list_legacy_rules.php` on purpose.** The converter copies
+> the pfSense `overload` alias name and the `category` names verbatim into the `overload`/`categories`
+> keys of its export array, but in the MVC Filter model both are `ModelRelationField`s keyed by uuid,
+> and `BaseListField::getValidators()` rejects any value not in that uuid option list
+> (`Related category not found.`/`Alias not found.`). OPNsense's own model migrations resolve names →
+> uuids first (`MFP1_0_3`/`MFP1_0_4` call `Category()->getByName()`), which is the behaviour we mirror:
+> `overload` → the migrated alias uuid (deterministic, D7); `categories` → dropped with a warning.
 
 Dropped, with a warning if non-empty: `sched` ("schedule not migrated"), `os` ("OS
 fingerprint filter dropped"), `dnpipe`/`pdnpipe`/`defaultqueue`/`ackqueue` ("traffic shaper
@@ -847,7 +873,8 @@ not migrated"), `vlanprio*`. Ignored silently: `id`, `tracker`, `created`, `upda
 `associated-rule-id` (but see warning below).
 
 Deps: `iface:<k>` for each interface, plus `net_deps` of source/destination nets, plus
-`alias:<p>` if a port is an alias name, plus `gw:<name>`.
+`alias:<p>` if a port is an alias name, plus `alias:<name>` if `overload` names an alias, plus
+`gw:<name>`.
 
 Warnings:
 * `associated-rule-id` present → "was the auto rule of a NAT port forward; now a standalone rule".
@@ -875,8 +902,7 @@ info note in the report.
 | `interface` | mapped key (excluded → UNSUPPORTED) |
 | `ipprotocol` | pf or `inet` |
 | `protocol` | pf `protocol` as-is (lower case) |
-| `source/{network\|address\|any,port,not}` | the same structure is copied, with `network` keyword keys validated via `map_net` |
-| `destination/{…}` | same |
+| `source`, `destination` | rebuild with `network`/`address`/`port`/`not`, keyword keys validated via `map_net`. **Do not copy pfSense's `<any/>`:** `DNat.xml` has no `any` child, so a copied `<any/>` is a stray node the model ignores. For an `any` endpoint emit `<network>any</network>` instead (the `NetworkAliasField` keyword `any`, same token the filter rules use for `source_net`; an empty `network` also means any, but be explicit). |
 | `target` | pf `target` (IP or alias; dep alias) |
 | `local-port` | pf `local-port` |
 | `natreflection` | `disable`→`disable`; `enable`, `pfsync`, `pfsync+enable` → `purenat` + warning "NAT+proxy/pfsync reflection has no equivalent, using pure NAT"; empty → omit |
@@ -915,6 +941,7 @@ one extra item `snat:mode` (label "Outbound NAT mode: hybrid") that the rules de
 | `staticnatport` | presence → `1` else `0` |
 | `log` | presence → `1` else `0` |
 | `tag`,`tagged` | copy |
+| `categories` | **dropped**, PARTIAL warning "outbound NAT categories not migrated; recreate them under Firewall ▸ Rules ▸ Categories if needed". `list_legacy_outbound_nat.php` emits the pfSense `category` names, but `snatrules/rule/categories` is a uuid `ModelRelationField` and pf2opn creates no category rows in v1 (same issue as §12.1.7). |
 | `description` | `pf_desc` |
 
 Mode `automatic`/`disabled` with rules present → the rules are still discovered, but as
@@ -925,8 +952,14 @@ PARTIAL "rules are inactive in mode <m>".
 `enabled`, `log`, `sequence`, `interface`, `type` (empty→`binat`), `external` (append the
 source mask if external has none), `source_net`/`destination_net` (`any` / address with
 `/32`|`/128` appended to bare IPs / network keyword), `source_not`, `destination_not`,
-`description`, `natreflection` (copy if non-empty). If source, destination, or external is
+`description`, `natreflection` **mapped** (see below). If source, destination, or external is
 missing → UNSUPPORTED "incomplete 1:1 rule".
+
+`natreflection` — `onetoone/rule/natreflection` allows only `default` (empty), `enable`, `disable`
+(no `purenat`), so mirror the §12.1.8 port-forward intent (reflection stays on; the mechanism is
+lost): `enable`→`enable`; `disable`→`disable`; `pfsync` and `pfsync+enable` → `enable` + PARTIAL
+warning "pfSense pfsync NAT reflection has no OPNsense equivalent; using proxy NAT reflection";
+empty → omit. Do **not** copy `pfsync` verbatim the way `MFP1_0_4.php` does — the model rejects it.
 
 #### 12.1.11 DHCPv4 → Dnsmasq (`dhcp_dnsmasq.py`)
 
@@ -952,16 +985,20 @@ Discovery: one per `pf:dhcpd/<ifkey>` **with `enable` present** (a disabled subn
 before). Deps: `iface:<ifkey>`; the interface needs a static IPv4 address, else UNSUPPORTED "Dnsmasq
 needs a static interface address".
 
-Render → APPEND to `opn:dnsmasq/dhcp_ranges` one `dhcp_ranges` element per range (uuid =
-`ctx.uuid("dhcp:<k>","r<n>")`):
+Render (per item) → **first REMOVE** `opn:dnsmasq/dhcp_ranges/dhcp_ranges[interface='<k>']` (the base's
+default row for this interface), **then APPEND** one `dhcp_ranges` element per range (uuid =
+`ctx.uuid("dhcp:<k>","r<n>")`). The REMOVE is the item's *first* placement so the writer (§10.1) applies
+it before the APPENDs; it **inverts** the old Kea rule — a fresh 26.7 sample ships a default LAN row, so
+it must be cleared or LAN ends up with two ranges. It **cannot** live in `finalize`: the writer applies
+`render` before `finalize`, so a `finalize` REMOVE would delete the rows the section had just appended.
 
 | opn `dhcp_ranges/…` | value |
 |---|---|
 | `interface` | mapped iface key (excluded → UNSUPPORTED) |
-| `start_addr` | main row: pf `range/from`; each `pool[]/range` row: its own `from`. A subnet with **no** `range`/`pool` (static maps only) is written `mode=static` with `start_addr` = the interface's network address — see the open item below |
+| `start_addr` | main row: pf `range/from`; each `pool[]/range` row: its own `from`. A subnet with **no** `range`/`pool` (static maps only) is written `mode=static` with `start_addr` = the interface's network address (bare, no mask — `RangeAddressField` accepts it; §2.1) |
 | `end_addr` | pf `range/to` (main) / `pool/range/to` (pool); empty for a static-only subnet |
 | `subnet_mask` | empty — OPNsense auto-calculates it from the interface |
-| `mode` | `static` when pf `denyunknown` is present or the subnet has no dynamic range; else omitted |
+| `mode` | `static` **only** when the subnet has no dynamic range (no `range` and no `pool`); omitted otherwise. `denyunknown` never sets `static` on its own — see the warnings below |
 | `lease_time` | pf `defaultleasetime` if non-empty, else omitted (dnsmasq default 86400; `0` = infinite) |
 | `domain` | pf `domain` if non-empty |
 | `domain_type` | `interface` (so the domain also covers the interface's other ranges and its static reservations — the docs recommend this, and `range` requires a full `end_addr`) |
@@ -1015,25 +1052,32 @@ that interface, so `interface:<k>` means exactly "clients on this subnet"; a *na
 
 `dhcp_options.option` holds the **numeric IANA code as a string** (the model fills it from
 `iana/dhcpv4-options.csv`; the config template renders `dhcp-option=…,<option>,<value>`). `nextserver`
-without a `filename` cannot use `dhcp_boot` (`filename` is Required) → PARTIAL.
+**or `tftp`** without a `filename` cannot use `dhcp_boot` (`filename` is Required) → PARTIAL ("… without
+a boot filename cannot use dhcp_boot").
 
 Per-host options (a `staticmap` with its own `dnsserver`/`gateway`/`domain`/`filename`/`nextserver` — the
-`dhcp.xml` fixture's third case): create a `dhcp_tags` row (name `pf2opn_<ifkey>_<mac-slug>`, unique), set
-it via `hosts.set_tag`, and attach the same `dhcp_options`/`dhcp_boot` rows keyed by `tag` instead of
+`dhcp.xml` fixture's third case): create a `dhcp_tags` row (tag name `pf2opn_<ifkey>_<mac-slug>`, unique),
+set it via `hosts.set_tag`, and attach the same `dhcp_options`/`dhcp_boot` rows keyed by `tag` instead of
 `interface`. No per-host options → no tag is created.
 
-Warnings (PARTIAL) when non-empty: `failover_peerip` ("dnsmasq HA uses split pools + `dhcp/reply_delay`,
-not a failover peer"), `mac_allow`/`mac_deny` ("per-range MAC ACLs not represented; use tags"),
-`ddnsdomain*` ("RFC 2136 dynamic DNS updates are not supported by dnsmasq"), `numberoptions/item`
-("custom DHCP options not migrated (Tier 2)"), `staticarp`, `ldap`, `rootpath`, `filename32/64/*arm`,
-`uefihttpboot`, `ignoreclientuids`, and `maxleasetime` as above.
+> **`tag`/`set_tag` values are the `dhcp_tags` row's uuid, not the tag name.** `hosts.set_tag`,
+> `dhcp_options.tag` and `dhcp_boot.tag` are `ModelRelationField`s into `dhcp_tags`, keyed by uuid. Every
+> such placement written for this item uses the row's uuid `ctx.uuid(item.id, "tag")` (the same uuid the
+> `dhcp_tags` row itself carries) — never the tag text. §13 check 8 compares these fields against the
+> `dhcp_tags` row **uuids**.
+
+Warnings (PARTIAL) when non-empty: `denyunknown` **with a dynamic range** ("pfSense deny-unknown has no
+Dnsmasq equivalent; the dynamic range is still served"), `failover_peerip` ("dnsmasq HA uses split pools
++ `dhcp/reply_delay`, not a failover peer"), `mac_allow`/`mac_deny` ("per-range MAC ACLs not represented;
+use tags"), `ddnsdomain*` ("RFC 2136 dynamic DNS updates are not supported by dnsmasq"),
+`numberoptions/item` ("custom DHCP options not migrated (Tier 2)"), `staticarp`, `ldap`, `rootpath`,
+`filename32/64/*arm`, `uefihttpboot`, `ignoreclientuids`, and `maxleasetime` as above.
 
 **finalize (range translator).**
 
-* REMOVE `opn:dnsmasq/dhcp_ranges[interface='<k>']` for **every** migrated key. This **inverts** the old
-  Kea rule: the base is a fresh 26.7 install whose sample config ships a default LAN `dhcp_ranges` row,
-  so clear the base row for an interface before appending the migrated one (otherwise LAN has two
-  ranges).
+* (The base's default `dhcp_ranges` row for an interface is cleared by the **range-item render step**
+  above, not here: the writer applies `render` before `finalize`, so a REMOVE in `finalize` would delete
+  the rows the section had just appended.)
 * SET `opn:dnsmasq/enable` = `1`.
 * SET `opn:dnsmasq/dhcp/fqdn` = `1` (register qualified lease names, matching pfSense's
   `regdhcp`-with-domain behaviour).
@@ -1066,13 +1110,14 @@ registers names itself:
   default); enable only if Dnsmasq DNS is disabled". In the default path the Dnsmasq `hosts` rows plus
   the Unbound forward cover both static and dynamic names.
 
-**Open item (confirm before M7 is built).**
+**Resolved: the static-only `start_addr` (was an open item).**
 
 A pfSense subnet with `enable` but **no** `range`/`pool` (static reservations only) has no dynamic range.
-Dnsmasq still needs a `dhcp_ranges` row to serve DHCP on that interface (`mode=static`), but `start_addr`
-is Required by the model. The design uses the interface's network address (e.g. `192.168.1.0`). Confirm
-the `RangeAddressField` accepts a network address; if not, use the interface IP instead. Whether any
-migrated subnet actually hits this path is not yet checked — verify it against the real config during M7.
+Dnsmasq still needs a `dhcp_ranges` row to serve DHCP on that interface (`mode=static`), and `start_addr`
+is Required. The design uses the interface's network address (e.g. `192.168.1.0`, written bare — no
+mask). Verified against 26.7.8: `RangeAddressField extends NetworkField` with `NetMaskAllowed=N`, so
+`isValidInput` accepts a bare network address (`192.168.1.0`) and rejects a `/mask` (§2.1). Keep the
+network-address form.
 
 #### 12.1.12 Virtual IPs (`vips.py`, base_policy `merge` by `interface+subnet`, container `virtualip`)
 `pf:virtualip/vip[]` → `opn:virtualip/vip[]`: `mode` (`ipalias`, `carp`, `proxyarp`; `other`
@@ -1118,7 +1163,9 @@ hostname+domain).
 `txtdata`. A pfSense `ip` holding several comma-separated IPs → one `host` per IP (suffix
 `/ip<n>` in the uuid) + warning. For each `aliases/item` → APPEND
 `opn:OPNsense/unboundplus/aliases/alias`: `enabled=1`, `host`=uuid of the first host,
-`hostname`←`host`, `domain`←`domain`, `description`←`description`.
+`hostname`←**the `<aliases/item>` text** (the alias's own name, not the parent `host` field),
+`domain`←`domain`, `description`←`description`. (`aliases/alias/host` is the `ModelRelationField`
+into `hosts/host`; `hostname` is the alias name.)
 
 **Static-map hosts** (`dnsstatic:<k>:<mac>`, translator `dns_static_host`) — **fallback, D6**.
 Discovered when pfSense `unbound/regdhcpstatic` is present *or* any staticmap carries a hostname, but with
@@ -1391,14 +1438,17 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    `gateway` is an output gateway name.
 6. **Gateways**: names unique; `interface` exists in output interfaces.
 7. **Static routes**: `gateway` exists.
-8. **Dnsmasq DHCP**: every migrated `dhcp_ranges.interface` is an output interface key; reservation IPs are
-   unique and inside their interface subnet; every `hosts.set_tag` / `dhcp_options.tag` / `dhcp_boot.tag`
-   references an existing `dhcp_tags` row; every emitted `dhcp_options` row has `type=set` (we never emit
-   `match`).
-9. **WireGuard**: each server `peers` uuid exists in clients; instances unique; names unique.
+8. **Dnsmasq DHCP**: every migrated `dhcp_ranges.interface` is an output interface key; no
+   `dhcp_ranges` row has `mode=static` together with a non-empty `end_addr` (`Dnsmasq.php` rejects that
+   — "Static only accepts a starting address"); reservation IPs are unique and each falls inside **at
+   least one** output interface subnet (the `hosts` row carries no interface, so a per-reservation
+   interface check isn't possible); every `hosts.set_tag` / `dhcp_options.tag` / `dhcp_boot.tag` value
+   equals the **uuid** of an existing `dhcp_tags` row (compared against the row uuids, not the tag
+   text); every emitted `dhcp_options` row has `type=set` (we never emit `match`).
+9. **WireGuard** (M10): each server `peers` uuid exists in clients; instances unique; names unique.
 10. **Unbound**: each alias `host` uuid exists.
 11. **Aliases**: names unique; nested alias entries exist.
-12. **system/dns{N}gw**: the named gateway exists.
+12. **system/dns{N}gw**: the named gateway exists (M4).
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
 sanitizing; `nat/outbound/mode` automatic with snat rules present.
@@ -1574,8 +1624,9 @@ Accept: the §16.3 e2e test passes with `minimal.xml` (system only); the system 
 Accept: goldens for `interfaces_vlans.xml`; an unmapped NIC → exit 2; the VLAN naming continues
 after the base's existing `vlan0N`.
 
-**M4 — Aliases, gateways, routes, VIPs** (§12.1.4–6, §12.1.12, §13 items 6, 7, 11)
-Accept: goldens; `pfB_` and reserved names → UNSUPPORTED; a gateway on a missing interface → UNSUPPORTED.
+**M4 — Aliases, gateways, routes, VIPs** (§12.1.4–6, §12.1.12, §13 items 6, 7, 11, 12)
+Accept: goldens; `pfB_` and reserved names → UNSUPPORTED; a gateway on a missing interface → UNSUPPORTED;
+`system/dns{N}gw` naming a gateway that is not in the output is an error (check 12).
 
 **M5 — Filter rules** (§12.1.7, §13 item 5 for filter)
 Accept: the goldens for `filter.xml`; ordering puts floating rules first; the dependency
@@ -1589,9 +1640,13 @@ Accept: goldens; the associated filter rule is auto-selected via deps; `nat/outb
 **M7 — Dnsmasq DHCPv4** (§12.1.11, §13 item 8)
 Accept: goldens; each migrated interface gets its `dhcp_ranges` rows and the base's default range for
 that interface is **replaced, not duplicated**; `dnsmasq/enable=1`, `dhcp/fqdn=1` and the interface list
-are set; static maps render as `hosts` rows with lower-cased MACs and reservations keep their IPs;
-`denyunknown` → `mode=static`; per-interface options land as `dhcp_options`/`dhcp_boot` rows; the Unbound
-query-forward to Dnsmasq is emitted and `dnsmasq/port` is not left colliding with Unbound's.
+are set; static maps render as `hosts` rows with lower-cased MACs and reservations keep their IPs; a
+static-only subnet (no `range`/`pool`) → `mode=static` with the bare network address as `start_addr`,
+while `denyunknown` on a subnet that *has* a dynamic range keeps the range and warns; `hosts.set_tag` /
+`dhcp_options.tag` / `dhcp_boot.tag` carry the `dhcp_tags` row **uuid** (never the name); the validator
+rejects `mode=static` combined with a non-empty `end_addr`; per-interface options land as
+`dhcp_options`/`dhcp_boot` rows; the Unbound query-forward to Dnsmasq is emitted and `dnsmasq/port` is
+not left colliding with Unbound's.
 
 **M8 — Unbound** (§12.1.13, §13 item 10)
 Accept: goldens incl. DoT upstreams with `verify` hostnames, the ACL action mapping, and `regdhcp`/
@@ -1686,8 +1741,9 @@ restated here.
   (filter `interface` row) stands; M5 keeps testing both paths.
 
 Open items carried forward from these answers: **Q3** — the `cf99p03` VM provisioning path (web UI);
-**Q6/M15** — verify the pfSense `avahi` field names against the package; and the static-only-subnet
-`start_addr` question noted at the end of §12.1.11.
+**Q6/M15** — verify the pfSense `avahi` field names against the package. (The static-only-subnet
+`start_addr` question was resolved on 2026-11-03 — `RangeAddressField` accepts a bare network address;
+see the note at the end of §12.1.11 and the AP-5 entry in §19.)
 
 ---
 
@@ -1765,3 +1821,30 @@ config generation against `26.7.8` rather than from memory:
 
 The ten corrections in the list above still stand; the DHCP correction is the Kea→Dnsmasq change captured
 in §12.1.11, §3 (D5/D6), §12.1.13 and §17 (M7). The session's own input config was **not** touched.
+
+### 2026-11-03 — spec amendments after the AP-5 review
+
+AP-5 reviewed the M0–M8 implementation against this spec and found places where the *spec* (not the code)
+was wrong or incomplete. Re-verified against `26.7.8` for this pass:
+
+* `Dnsmasq/Dnsmasq.xml` v1.0.9 — `hosts/set_tag`, `dhcp_options/tag`, `dhcp_boot/tag`,
+  `dhcp_ranges/set_tag` are `ModelRelationField`s into `dhcp_tags` (uuid-keyed), and
+  `Dnsmasq.php::performValidation()` rejects `mode=static` with a non-empty `end_addr`
+  ("Static only accepts a starting address") and requires `end_addr` for a non-static IPv4 range (§12.1.11).
+* `Dnsmasq/FieldTypes/RangeAddressField.php` — `extends NetworkField` with `NetMaskAllowed=N`, so a bare
+  network address is a valid `start_addr` (the §12.1.11 open item is resolved).
+* `Firewall/Filter.xml` — `rules/rule/categories`, `snatrules/rule/categories`,
+  `onetoone/rule/categories` and `rules/rule/overload` are `ModelRelationField`s; `overload` relates to
+  `Firewall/Alias`. `BaseListField::getValidators()` rejects any value not in the uuid option list, and
+  `MFP1_0_3`/`MFP1_0_4` resolve category names → uuids via `Category()->getByName()` before assigning.
+  So §12.1.7/§12.1.9 must **not** copy the pfSense names the way `list_legacy_rules.php` /
+  `list_legacy_outbound_nat.php` do (`overload` → migrated alias uuid; `categories` → dropped + warning).
+* `Firewall/Migrations/MFP1_0_4.php` — for 1:1, copies `natreflection` verbatim; the `onetoone` model
+  allows only `default`/`enable`/`disable`, so §12.1.10 now maps `pfsync` variants → `enable` + warning
+  rather than copying them.
+* `Firewall/DNat.xml` — `source`/`destination` have no `any` child, so §12.1.8 now emits
+  `<network>any</network>` instead of copying pfSense's `<any/>`.
+* §13 check 8 tightened and extended (tag uuids; `static`+`end_addr` guard), check 12 assigned to M4,
+  check 9 marked M10; §11 rule 5 now names `cli.main()` as the install point for `RedactingFilter`.
+  The `categories`/`overload` and `mode=static` amendments change what M5/M6/M7 must render; golden
+  tests will need to move with them.
