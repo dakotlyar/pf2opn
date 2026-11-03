@@ -921,9 +921,31 @@ its pass rule. If pf `associated-rule-id` == `pass` → PARTIAL "pfSense ‘pass
 add an explicit pass rule manually".
 
 #### 12.1.9 Outbound NAT (`nat.py: NatOutbound`, base_policy `replace`, container `OPNsense/Firewall/Filter/snatrules`)
-`finalize` always SETs `opn:nat/outbound/mode` = pf `nat/outbound/mode` (`automatic`,
-`hybrid`, `advanced`, `disabled`). An empty value becomes `automatic`. The outbound section is
-one extra item `snat:mode` (label "Outbound NAT mode: hybrid") that the rules depend on.
+**Mode.** `finalize` SETs `opn:nat/outbound/mode` to the **mapped** pfSense mode, not the raw
+one, and the `snat:mode` item label uses the mapped value too:
+
+| pf `nat/outbound/mode` | opn mode |
+|---|---|
+| (empty), `automatic` | `automatic` |
+| `advanced` | `advanced` |
+| `disabled` | `disabled` |
+| `hybrid`, ≥1 `nat/outbound/rule` | **`advanced`** |
+| `hybrid`, 0 rules | `automatic` |
+
+pfSense `hybrid` renders the stored `nat/outbound/rule` list (`filter.inc`, `case "hybrid"` →
+`get_anynat_rules_list('nat')`) **and** a runtime automatic set
+(`filter_nat_rules_outbound_automatic()`); the stored list already contains pfSense's
+*materialized* automatic rules (the `Auto created rule…` entries — 30 of the 37 in the reference
+config). OPNsense `hybrid` would render our migrated rules *plus* OPNsense's own, different
+automatic set (`SourceNatController::getAutomaticOutboundNatRules()` → configd
+`filter list automatic_source_nat` → `filter_auto_source_nat()`, `/usr/local/etc/inc/filter.lib.inc`),
+whose sources are per-gateway-interface networks + `lo0` + `127.0.0.0/8` only. OPNsense `advanced`
+renders exactly the migrated rules and suppresses the automatic set entirely — `filter_auto_source_nat()`
+returns nothing unless the mode is `''`/`automatic`/`hybrid` — so `advanced` is the faithful 1:1 and
+avoids redundant rules. A `hybrid` config with no explicit rules has nothing to render in `advanced`,
+so it maps to `automatic`. Emit a mode-item warning: "pfSense hybrid outbound NAT migrated as
+OPNsense advanced (manual); pfSense's materialized rules are copied verbatim and OPNsense's
+automatic outbound rule set is not generated".
 
 `pf:nat/outbound/rule[]` → `opn:OPNsense/Firewall/Filter/snatrules/rule[]`. Mirrors `list_legacy_outbound_nat.php`:
 
@@ -934,7 +956,7 @@ one extra item `snat:mode` (label "Outbound NAT mode: hybrid") that the rules de
 | `nosync` | presence → `1` else `0` |
 | `sequence` | `10*(n+1)` |
 | `interface` | mapped key |
-| `ipprotocol` | pf or `inet` |
+| `ipprotocol` | **derive, do not default.** Explicit pf `ipprotocol` (`inet`/`inet6`) is kept; empty → `inet6` when any of `source_net`, `destination_net` or `target` (after `map_net`/`_outbound_target`) is an IPv6 literal or CIDR (contains `:`), otherwise `inet`. This mirrors `Firewall/Filter.php::performValidation()` ("Source/Destination address type should match selected TCP/IP protocol version"). **Never let an IPv6 source such as `::1/128` keep `inet`:** `pfctl` rejects the rule ("rule expands to no valid combination") and the entire ruleset fails to load (0 rules). |
 | `protocol` | upper-cased or `any` |
 | `source_net`,`source_not` | `pf_endpoint(source)` → `map_net` |
 | `source_port` | pf `sourceport`, `:`→`-` |
@@ -1519,9 +1541,18 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
 10. **Unbound**: each alias `host` uuid exists.
 11. **Aliases**: names unique; nested alias entries exist.
 12. **system/dns{N}gw**: the named gateway exists (M4).
+13. **Address-family match on NAT rules**: for every `snatrules/rule`, `onetoone/rule` and
+   `nat/rule` (port forward), `ipprotocol` must match the family of its address fields
+   (`source_net`/`destination_net`/`target`, and `source`/`destination`/`external` for
+   `nat`/`onetoone`): an address that contains `:` requires `inet6`, a colon-free address requires
+   `inet`; a keyword (`any`, `(self)`, `<key>`/`<key>ip`), an alias name, or an empty value imposes
+   no constraint. This mirrors `Firewall/Filter.php::performValidation()`; a mismatch is a **model
+   error**, and on OPNsense a lone `nat … inet from ::1/128` makes `pfctl` reject the whole
+   `/tmp/rules.debug` ("rule expands to no valid combination" → 0 rules loaded).
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
-sanitizing; `nat/outbound/mode` automatic with snat rules present.
+sanitizing; `nat/outbound/mode` automatic with snat rules present; pfSense `hybrid` outbound NAT
+mapped to OPNsense `advanced` (§12.1.9).
 
 ---
 
@@ -1976,3 +2007,46 @@ synthetic fixtures had masked: every WireGuard peer came back UNSUPPORTED "peer 
   shape. No other field in this spec describes a `row`-stored value as text: the Unbound `acls` rows
   (§12.1.13) and the tunnel `addresses/row` were already correct, and the remaining multi-value fields
   (alias `address`, NTP `timeservers`, Unbound `ip`, filter `interface`) really are text in pfSense.
+
+### 2026-11-03 — M14 blocker: outbound NAT will not load on 26.7.8 (`ipprotocol`), and `hybrid` mode
+
+Migrating `config-gateway.home.asmartass.me-20261101163750.xml` produced `nat/outbound/mode=hybrid`
+plus 36 MVC `snatrules`. Importing it on OPNsense **26.7.8_2**, `configctl filter reload`;
+`pfctl -nf /tmp/rules.debug` returned two `rule expands to no valid combination` errors, so `pfctl`
+rejected the file and **0 rules loaded**. Bisected on a throwaway VM. Two independent findings:
+
+1. **The failing rules are pf2opn's own copied rules, not OPNsense's automatic set.** The two error
+   lines carry pfSense's wording — `# Auto created rule for ISAKMP - localhost to WAN` /
+   `# Auto created rule - localhost to WAN` — and both read `nat on vtnet0 inet from ::1/128 …`.
+   They are `snatrules/rule` entries rendered by `plugins.inc.d/pf.inc:180-182`
+   (`$fw->registerSourceNatRule(50, $rule->serialize())`, prio 50). OPNsense's genuine automatic set
+   renders separately as `# Automatic outbound rule` (prio 200) and **contained no `::1/128`**: it is
+   built by `filter_auto_source_nat()` (`/usr/local/etc/inc/filter.lib.inc:176`) from
+   `pf_get_default_nat_outbound_networks()` (`plugins.inc.d/pf.inc:285`), whose sources are
+   per-gateway-interface network keywords plus `127.0.0.0/8` only (hardcoded `ipprotocol => inet`, always
+   valid). The earlier hypothesis ("OPNsense's automatic set hardcodes `inet` for `::1/128`") is wrong.
+   **Root cause:** pfSense stores its materialized automatic rules with an **empty** `<ipprotocol>`,
+   and `nat.py` mapped empty → `inet` unconditionally (`pf_text(rule, "ipprotocol") or "inet"`, line
+   ~345). The two loopback IPv6 rules (`source_net=::1/128`) therefore became `inet`. OPNsense itself
+   calls this invalid: `Firewall/Filter.php::performValidation()` requires the family of `source_net`
+   to match `ipprotocol` ("Source address type should match selected TCP/IP protocol version"), and
+   `pfctl` agrees. With the family fixed (`::1/128` → `inet6`) the file loads (0 errors) in any mode;
+   fix removed and it fails again in both `hybrid` and `advanced` — so the fix is mandatory and
+   mode-independent.
+2. **Mode.** pfSense `hybrid` renders the stored `nat/outbound/rule` list **and** a runtime automatic
+   set (`filter.inc`: `case "hybrid"` falls through to the `advanced` block, and the automatic block
+   runs for `''`/`automatic`/`hybrid`). That stored list already contains pfSense's *materialized*
+   automatic rules: **30 of the 37** are `Auto created rule…`; only **7** are genuinely custom
+   (rule 0 `opt7→wanip`; Xbox One / PS4 / Switch / Switch Lite / Meraki MX100 static-port `/32`s;
+   `Wireguard_Networks`). OPNsense `hybrid` would add OPNsense's own automatic set on top, which is
+   **not** what pfSense rendered, and OPNsense `automatic` ignores manual rules (so the 7 custom rules
+   would be lost). Decision: map pfSense `hybrid` (with ≥1 rule) → OPNsense **`advanced`**, which
+   `filter_auto_source_nat()` leaves with no automatic set and renders exactly the migrated rules
+   (§12.1.9). Verified on the VM: `advanced` + family fix → `pfctl -nf` exit 0, exactly 36 nat rules,
+   0 automatic lines; `hybrid` + family fix → exit 0 but 96 nat lines (migrated rules duplicated by
+   OPNsense's automatic set); `advanced` without the fix → 2 errors again.
+
+Spec edits: §12.1.9 mode table + `ipprotocol` row, §13 check 13 + warning. Not determined: whether any
+pfSense `hybrid` config exists whose stored rule list is *not* a superset of its runtime automatic
+set — if so, mapping to `advanced` would drop that automatic coverage; the `hybrid`+0-rules →
+`automatic` guard covers the empty case only.
