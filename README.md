@@ -50,9 +50,12 @@ pf2opn inspect SOURCE --base BASE [--json]
 pf2opn migrate SOURCE --base BASE -o OUT [--report REPORT]
                (--select-all-ok | --selection FILE) [--map-nic PF=OPN ...]
                [--keep-base-rules] [--force]
-pf2opn tui     SOURCE --base BASE -o OUT [--report REPORT] [--selection FILE]
+pf2opn tui     [SOURCE] [--base BASE] [-o OUT] [--report REPORT] [--selection FILE]
                [--force]
 ```
+
+For `tui`, `SOURCE`, `--base` and `-o` are **optional**: run `pf2opn tui` on its own and the
+Load screen collects them (any you pass pre-fill the fields). `migrate`/`inspect` still require them.
 
 * `SOURCE` — the pfSense `config.xml` to read. It is opened read-only and is
   **never** modified.
@@ -112,15 +115,21 @@ error). Unknown ids in `selected`/`deselected` are an error (exit 2).
 ## TUI usage
 
 ```
-pf2opn tui SOURCE --base BASE -o OUT
+pf2opn tui [SOURCE] [--base BASE] [-o OUT]
 ```
+
+Or just `pf2opn tui` with no arguments — the Load screen asks for the three paths.
+`--report` and `--selection` stay flags (the report defaults to `OUT` with its
+suffix replaced by `.report.md`).
 
 Screens run left to right; `Esc` or `b` goes back one screen, and `q` quits from
 anywhere (with a confirmation if the selection changed and nothing was written).
 
-1. **Load** — a summary: source path, pfSense version/hostname, section counts,
-   base path/hostname, and any base version-mismatch warnings.
-   `enter` continues.
+1. **Load** — editable fields for the pfSense config, the OPNsense base, and the
+   output path (pre-filled from any flags). Each is validated inline; `enter`
+   continues once all three are valid. Then a summary: source path, pfSense
+   version/hostname, section counts, base path/hostname, and any base
+   version-mismatch warnings.
 2. **Interface map** — a table of `Incl | Key | Description | pfSense device |
    Kind | OPNsense device`. VLAN/WireGuard rows show their derived device
    (read-only); physical rows are editable.
