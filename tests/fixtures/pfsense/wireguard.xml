@@ -55,6 +55,7 @@
 						<row>
 							<address>10.2.0.2</address>
 							<mask>32</mask>
+							<descr/>
 						</row>
 					</addresses>
 				</item>
@@ -76,21 +77,49 @@
 					<publickey>+2KItINbA1TlNOS/De5oqk6uu5uvPHnZW5+8RRLAprg=</publickey>
 					<presharedkey>9mJkCtTIB0LnGO2BJXk39zfzxK1/bI6mJUA/UYKMgFw=</presharedkey>
 					<persistentkeepalive>25</persistentkeepalive>
-					<allowedips>10.0.5.21/32, 0.0.0.0/0</allowedips>
+					<allowedips>
+						<row>
+							<address>10.0.5.21</address>
+							<mask/>
+							<descr/>
+						</row>
+						<row>
+							<address>0.0.0.0</address>
+							<mask>0</mask>
+							<descr/>
+						</row>
+					</allowedips>
 				</item>
 				<item>
 					<tun>tun_wg1</tun>
 					<descr>Site B</descr>
 					<enabled>yes</enabled>
 					<publickey>3897oKeKkibEDrhzfRI5T1sBuSiuQl04L/Vz2acE4sE=</publickey>
-					<allowedips>10.0.5.22/32, 192.168.8.0/24</allowedips>
+					<allowedips>
+						<row>
+							<address>10.0.5.22</address>
+							<mask>32</mask>
+							<descr/>
+						</row>
+						<row>
+							<address>192.168.8.0</address>
+							<mask>24</mask>
+							<descr/>
+						</row>
+					</allowedips>
 				</item>
 				<item>
 					<tun>tun_wg1</tun>
 					<descr>Site C</descr>
 					<enabled>yes</enabled>
 					<publickey>f0aPI370BKY3ZERyWVoQyGsdESDT5Jz1kFTAgfBIjdo=</publickey>
-					<allowedips>172.16.5.0/24</allowedips>
+					<allowedips>
+						<row>
+							<address>172.16.5.0</address>
+							<mask>24</mask>
+							<descr/>
+						</row>
+					</allowedips>
 				</item>
 				<item>
 					<tun>unassigned</tun>
@@ -98,7 +127,13 @@
 					<enabled>yes</enabled>
 					<publickey>pSt984hcQemGKBWutLW2rt5LcqR5evWqttpJNEnfN1I=</publickey>
 					<persistentkeepalive>25</persistentkeepalive>
-					<allowedips>0.0.0.0/0</allowedips>
+					<allowedips>
+						<row>
+							<address>0.0.0.0</address>
+							<mask>0</mask>
+							<descr/>
+						</row>
+					</allowedips>
 				</item>
 			</peers>
 		</wireguard>

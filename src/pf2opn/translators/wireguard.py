@@ -24,8 +24,28 @@ _DEFAULT_ROUTES = frozenset({"0.0.0.0/0", "::/0"})
 _TUN_NAME = re.compile(r"^tun_wg(\d+)$")
 
 
-def _split_allowed(text: str) -> list[str]:
-    return [part for part in re.split(r"[,\s]+", (text or "").strip()) if part]
+def _row_cidrs(parent: etree._Element, path: str) -> list[str]:
+    """Parse ``<path>/row`` ``address``+``mask`` into CIDR strings (§12.1.17).
+
+    Shared by a tunnel's ``addresses`` and a peer's ``allowedips`` — pfSense
+    stores both as the same ``<row><address>…</address><mask>…</mask></row>``
+    shape, never as text. A row with an empty ``mask`` takes the host mask for
+    its address family (``/32`` IPv4, ``/128`` IPv6); a bare address is never
+    emitted.
+    """
+    cidrs: list[str] = []
+    for row in parent.findall(path):
+        address = pf_text(row, "address")
+        if not address:
+            continue
+        mask = pf_text(row, "mask")
+        if not mask:
+            try:
+                mask = "128" if ipaddress.ip_address(address).version == 6 else "32"
+            except ValueError:
+                mask = "32"
+        cidrs.append(f"{address}/{mask}")
+    return cidrs
 
 
 def _is_host(value: str) -> bool:
@@ -68,13 +88,7 @@ def _assigned_ifkey(name: str, src: SourceContext) -> str | None:
 
 def _tunnel_address(tunnel: etree._Element, src: SourceContext) -> str:
     """The tunnel's own address: its ``addresses`` rows, else its interface."""
-    parts: list[str] = []
-    for row in tunnel.findall("addresses/row"):
-        address = pf_text(row, "address")
-        if not address:
-            continue
-        mask = pf_text(row, "mask")
-        parts.append(f"{address}/{mask}" if mask else address)
+    parts = _row_cidrs(tunnel, "addresses/row")
     if parts:
         return ",".join(parts)
 
@@ -196,7 +210,7 @@ class WgTunnelTranslator(Translator):
             disableroutes = any(
                 entry in _DEFAULT_ROUTES
                 for peer in own_peers
-                for entry in _split_allowed(pf_text(peer, "allowedips"))
+                for entry in _row_cidrs(peer, "allowedips/row")
             )
 
             ifkey = _assigned_ifkey(name, src)
@@ -208,7 +222,7 @@ class WgTunnelTranslator(Translator):
                 net = _server_net(tunnel_address)
                 remote: list[str] = []
                 for peer in own_peers:
-                    for entry in _split_allowed(pf_text(peer, "allowedips")):
+                    for entry in _row_cidrs(peer, "allowedips/row"):
                         if entry in _DEFAULT_ROUTES:
                             continue  # a default route is not a "remote subnet"
                         if not (_is_host(entry) and net is not None and _in_net(entry, net)):
@@ -349,7 +363,7 @@ class WgPeerTranslator(Translator):
                 )
                 continue
 
-            allowed = _split_allowed(pf_text(peer, "allowedips"))
+            allowed = _row_cidrs(peer, "allowedips/row")
             if not allowed:
                 items.append(
                     Item(

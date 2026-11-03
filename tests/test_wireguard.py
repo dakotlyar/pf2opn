@@ -87,20 +87,75 @@ def test_peer_statuses(wireguard_plan) -> None:
     assert peers["wgpeer:3"].reason == "peer not attached to a tunnel"
 
 
+def _peer_items(allowedips: str, addresses: str | None = None) -> list:
+    """A one-tunnel/one-peer source with the given row XML; discover the peer."""
+    if addresses is None:
+        addresses = "<row><address>10.0.9.1</address><mask>24</mask></row>"
+    pf = etree.fromstring(
+        "<pfsense><installedpackages><wireguard>"
+        "<tunnels><item><name>tun_wg5</name><descr>t</descr><enabled>yes</enabled>"
+        f"<addresses>{addresses}</addresses>"
+        "</item></tunnels>"
+        "<peers><item><tun>tun_wg5</tun><descr>Host only</descr><enabled>yes</enabled>"
+        f"<allowedips>{allowedips}</allowedips></item></peers>"
+        "</wireguard></installedpackages></pfsense>"
+    )
+    src = types.SimpleNamespace(pf=pf, base=etree.fromstring("<opnsense/>"))
+    return registry.get("wg_peer").discover(src, None)
+
+
 def test_peer_with_host_address_is_ok() -> None:
+    """A row-parsed host address inside the tunnel net → OK (§12.1.17)."""
+    items = _peer_items("<row><address>10.0.9.5</address><mask>32</mask><descr/></row>")
+    assert items[0].status == Status.OK
+    assert items[0].data["tunneladdress"] == "10.0.9.5/32"
+
+
+def test_peer_allowedips_rows_are_parsed(wireguard_plan) -> None:
+    """A row-parsed peer yields its tunnel address, not "no allowed IPs"."""
+    _src, plan = wireguard_plan
+    peers = _items(plan, "wg_peer")
+    assert peers["wgpeer:0"].status == Status.PARTIAL
+    assert peers["wgpeer:0"].data["tunneladdress"] == "10.0.5.21/32"
+    assert peers["wgpeer:1"].data["tunneladdress"] == "10.0.5.22/32"
+
+
+def test_allowedips_empty_mask_uses_host_mask() -> None:
+    """An empty mask is the host mask: /32 for IPv4, /128 for IPv6 (§12.1.17)."""
+    ipv4 = _peer_items("<row><address>10.0.9.5</address><mask/><descr/></row>")
+    assert ipv4[0].data["tunneladdress"] == "10.0.9.5/32"
+
+    ipv6 = _peer_items(
+        "<row><address>fd00::5</address><mask/><descr/></row>",
+        addresses="<row><address>fd00::1</address><mask>64</mask></row>",
+    )
+    assert ipv6[0].data["tunneladdress"] == "fd00::5/128"
+
+
+def test_disableroutes_from_row_default_route() -> None:
+    """`allowedips/row` address=0.0.0.0 + mask=0 is the default route (§12.1.17)."""
     pf = etree.fromstring(
         "<pfsense><installedpackages><wireguard>"
         "<tunnels><item><name>tun_wg5</name><descr>t</descr><enabled>yes</enabled>"
         "<addresses><row><address>10.0.9.1</address><mask>24</mask></row></addresses>"
         "</item></tunnels>"
-        "<peers><item><tun>tun_wg5</tun><descr>Host only</descr><enabled>yes</enabled>"
-        "<allowedips>10.0.9.5/32</allowedips></item></peers>"
+        "<peers><item><tun>tun_wg5</tun><descr>Trusted</descr><enabled>yes</enabled>"
+        "<allowedips><row><address>0.0.0.0</address><mask>0</mask><descr/></row></allowedips>"
+        "</item></peers>"
         "</wireguard></installedpackages></pfsense>"
     )
-    src = types.SimpleNamespace(pf=pf, base=etree.fromstring("<opnsense/>"))
-    items = registry.get("wg_peer").discover(src, None)
-    assert items[0].status == Status.OK
-    assert items[0].data["tunneladdress"] == "10.0.9.5/32"
+    src = types.SimpleNamespace(
+        pf=pf, base=etree.fromstring("<opnsense/>"), pf_ifaces={}
+    )
+    tunnel = registry.get("wg_tunnel").discover(src, None)[0]
+    assert tunnel.data["disableroutes"] is True
+
+
+def test_peer_without_allowedips_is_unsupported() -> None:
+    """No allowedips rows at all → UNSUPPORTED "peer has no allowed IPs"."""
+    items = _peer_items("")
+    assert items[0].status == Status.UNSUPPORTED
+    assert items[0].reason == "peer has no allowed IPs"
 
 
 # -- rendering --------------------------------------------------------------- #
