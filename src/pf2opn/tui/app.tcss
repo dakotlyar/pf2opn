@@ -23,6 +23,16 @@ Screen {
     height: auto;
 }
 
+.config-path-field {
+    height: auto;
+}
+
+.config-path-list {
+    height: auto;
+    max-height: 8;
+    border: round $primary;
+}
+
 .load-label {
     color: $text-muted;
     margin-top: 1;

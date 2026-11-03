@@ -14,6 +14,7 @@ from ...context import SourceContext
 from ...model import Status
 from ...registry import all_translators
 from ...versions import MODEL_VERSIONS
+from ..widgets import ConfigPathField, scan_xml_roots
 from . import AppScreen
 from .ifmap import IfaceMapScreen
 
@@ -49,9 +50,18 @@ def base_version_warnings(src) -> list[str]:
 
 
 class LoadScreen(AppScreen):
-    """Collect the three paths, validate them, then continue to the interface map."""
+    """Collect the three paths, validate them, then continue to the interface map.
 
-    BINDINGS = [("enter", "continue_", "Continue")]
+    The source and base fields are :class:`ConfigPathField`s (a search box plus a
+    list of ``*.xml`` candidates); the output stays a plain
+    :class:`~textual.widgets.Input` because it names a new file rather than an
+    existing one to find (§15).
+    """
+
+    BINDINGS = [
+        ("enter", "continue_", "Continue"),
+        ("r", "rescan", "Rescan"),
+    ]
 
     #: Seconds to wait after the last keystroke before re-parsing (§15).
     PARSE_DEBOUNCE = 0.4
@@ -60,18 +70,22 @@ class LoadScreen(AppScreen):
         source, base, output = self._initial_values()
         with VerticalScroll(id="load-body"):
             with Vertical(id="load-fields"):
-                yield Static("pfSense source", classes="load-label")
-                yield Input(value=source, placeholder="config.xml to read (read-only)", id="load-source")
-                yield Static("", id="load-source-error", classes="load-error")
-                yield Static("OPNsense base", classes="load-label")
-                yield Input(
-                    value=base,
-                    placeholder="base config.xml exported from the target",
-                    id="load-base",
+                yield ConfigPathField(
+                    "pfSense source",
+                    "source",
+                    "config.xml to read (read-only); type to search",
+                    value=source,
                 )
-                yield Static("", id="load-base-error", classes="load-error")
+                yield ConfigPathField(
+                    "OPNsense base",
+                    "base",
+                    "base config.xml exported from the target (blank = built-in base)",
+                    value=base,
+                )
                 yield Static("Output", classes="load-label")
-                yield Input(value=output, placeholder="config.xml to write", id="load-output")
+                yield Input(
+                    value=output, placeholder="config.xml to write", id="load-output"
+                )
                 yield Static("", id="load-output-error", classes="load-error")
             yield Static(id="load-summary")
         yield Footer()
@@ -83,7 +97,8 @@ class LoadScreen(AppScreen):
     def _initial_values(self) -> tuple[str, str, str]:
         app = self.pfapp
         if app.src is not None:
-            source, base = str(app.src.source_path), str(app.src.base_path)
+            source = str(app.src.source_path)
+            base = "" if app.src.base_is_default else str(app.src.base_path)
         else:
             source = getattr(app.args, "source", None) or ""
             base = getattr(app.args, "base", None) or ""
@@ -99,6 +114,47 @@ class LoadScreen(AppScreen):
         self._parse_timer = None
         self._validate()
         self.query_one("#load-source", Input).focus()
+        self._start_scan()
+
+    # ------------------------------------------------------------------ #
+    # Config search (§15): scan roots once, filter locally
+    # ------------------------------------------------------------------ #
+
+    def _search_roots(self) -> list[Path]:
+        """The roots scanned for ``*.xml`` candidates (§15)."""
+        app = self.pfapp
+        home = Path.home()
+        roots = [Path.cwd(), home / "Downloads", home / "Desktop", home]
+        for value in (
+            getattr(app.args, "source", None),
+            getattr(app.args, "base", None),
+            getattr(app.args, "output", None),
+            app.output_path,
+        ):
+            if value:
+                roots.append(Path(value).expanduser().parent)
+        for extra in getattr(app.args, "search_path", None) or []:
+            roots.append(Path(extra).expanduser())
+        return roots
+
+    def _start_scan(self) -> None:
+        self._scan_roots(self._search_roots())
+
+    @work(thread=True, exclusive=True, group="scan")
+    def _scan_roots(self, roots: list[Path]) -> None:
+        found = scan_xml_roots(roots)
+        self.app.call_from_thread(self._candidates_found, found)
+
+    def _candidates_found(self, found: list[Path]) -> None:
+        for name in ("source", "base"):
+            self.query_one(f"#load-{name}-field", ConfigPathField).set_candidates(found)
+
+    def action_rescan(self) -> None:
+        self._start_scan()
+
+    def check_action_rescan(self) -> bool:
+        # §15: `r` rescans, but must not steal the letter from a text input.
+        return not isinstance(self.focused, Input)
 
     # ------------------------------------------------------------------ #
     # Validation (§15): cheap checks on every change, parse debounced
@@ -112,46 +168,52 @@ class LoadScreen(AppScreen):
             return "required"
         return paths.check_output(output, source or None, base or None, self.pfapp.force)
 
+    def _context_matches(self, src: SourceContext, source: str, base: str) -> bool:
+        """True when the loaded context already describes these field values."""
+        if Path(source) != Path(src.source_path):
+            return False
+        if not base:
+            return src.base_is_default
+        return src.base_path is not None and Path(base) == Path(src.base_path)
+
     def _validate(self) -> None:
         source, base, output = (self._text(field) for field in _FIELDS)
-        src = self.pfapp.src
 
         s_err = "required" if not source else paths.file_error(source)
-        b_err = "required" if not base else paths.file_error(base)
+        # §15: an empty base is valid — it means the built-in base (§5.1).
+        b_err = None if not base else paths.file_error(base)
         o_err = self._output_error(output, source, base)
 
-        source_matches = src is not None and Path(source) == Path(src.source_path)
-        base_matches = src is not None and Path(base) == Path(src.base_path)
-        if source_matches:
-            s_err = None
-        if base_matches:
-            b_err = None
-
         self._errors = {"source": s_err, "base": b_err, "output": o_err}
-        self._valid = {
-            "source": s_err is None and source_matches,
-            "base": b_err is None and base_matches,
-            "output": o_err is None,
-        }
         for field, message in self._errors.items():
             self.query_one(f"#load-{field}-error", Static).update(message or "")
 
         # The value collected here is what the run uses (§9): keep the app's
         # output path (and hence the report default) in step with the field.
-        if src is not None and output and o_err is None:
+        if source and output and o_err is None:
             self.pfapp.set_output(output)
 
-        if source_matches and base_matches:
+        src = self.pfapp.src
+        context_matches = src is not None and self._context_matches(src, source, base)
+        cheap_ok = s_err is None and b_err is None and o_err is None
+
+        if cheap_ok and context_matches:
             self._cancel_parse()
+            self._valid = {"source": True, "base": True, "output": True}
             self._update_summary()
             return
 
+        self._valid = {
+            "source": False,
+            "base": False,
+            "output": o_err is None,
+        }
         self._query_summary().update("")
         self._cancel_parse()
-        if s_err is not None or b_err is not None:
+        if not cheap_ok:
             return
 
-        # Cheap checks pass but these exact paths have not parsed yet.
+        # Cheap checks pass but the context needs (re)loading.
         self._parse_timer = self.set_timer(self.PARSE_DEBOUNCE, self._debounced_parse)
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -173,15 +235,17 @@ class LoadScreen(AppScreen):
     @work(thread=True, exclusive=True, group="load")
     def _load_context(self, source: str, base: str) -> None:
         s_err = paths.source_error(source)
-        b_err = paths.base_error(base)
+        b_err = paths.base_error(base) if base else None
         if s_err is not None or b_err is not None:
             self.app.call_from_thread(self._parse_failed, source, base, s_err, b_err)
             return
-        src = SourceContext.load(source, base)
+        src = SourceContext.load(source, base or None)
         ifmap, plan = self.pfapp.make_plan(src)
         self.app.call_from_thread(self._context_loaded, source, base, src, ifmap, plan)
 
-    def _parse_failed(self, source: str, base: str, s_err: str | None, b_err: str | None) -> None:
+    def _parse_failed(
+        self, source: str, base: str, s_err: str | None, b_err: str | None
+    ) -> None:
         if not self._same_text(source, base):
             return
         self._errors["source"] = s_err
@@ -199,7 +263,7 @@ class LoadScreen(AppScreen):
         self._validate()
 
     def _same_text(self, source: str, base: str) -> bool:
-        return Path(self._text("source")) == Path(source) and Path(self._text("base")) == Path(base)
+        return self._text("source") == source and self._text("base") == base
 
     # ------------------------------------------------------------------ #
     # Continue / summary
@@ -225,6 +289,10 @@ class LoadScreen(AppScreen):
     def _summary(self) -> str:
         src = self.pfapp.src
         plan = self.pfapp.plan
+        if src.base_is_default:
+            base_line = "Base: built-in default (factory base) — confirm NICs"
+        else:
+            base_line = f"Base: {src.base_path}"
         lines = [
             "[b]pf2opn[/b] — review the migration before writing anything.",
             "",
@@ -232,7 +300,7 @@ class LoadScreen(AppScreen):
             f"  pfSense version: {src.pf_version or '(unknown)'}",
             f"  hostname: {src.pf_hostname or '(unknown)'}",
             "",
-            f"Base: {src.base_path}",
+            base_line,
             f"  OPNsense hostname: {src.base_hostname or '(unknown)'}",
             "",
             "Sections found:",

@@ -19,6 +19,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pf2opn.tui" = ["app.tcss"]
+"pf2opn" = ["data/*.xml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

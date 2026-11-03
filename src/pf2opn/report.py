@@ -24,6 +24,14 @@ _FIXED_FOLLOWUPS = [
     "Dynamic DHCP leases are not migrated; clients will re-request.",
 ]
 
+#: §14: only when the built-in base was used (§5.1 / D2).
+_DEFAULT_BASE_FOLLOWUP = (
+    "Output was merged into pf2opn's built-in factory base: interface devices "
+    "(`igc0`/`igc1`) and system settings are defaults \u2014 confirm interface "
+    "assignments, and change the root password (the factory default is `opnsense`) "
+    "before connecting."
+)
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -51,6 +59,11 @@ def render_report(
     lines.append(f"- source: `{src.source_path}`")
     lines.append(f"- source hostname: {src.pf_hostname or '(unknown)'}")
     lines.append(f"- pfSense version: {src.pf_version or '(unknown)'}")
+    if src.base_is_default:
+        base_origin = "built-in default (pf2opn factory base, 26.7)"
+    else:
+        base_origin = f"`{src.base_path}`"
+    lines.append(f"- base: {base_origin}")
     lines.append(f"- base hostname: {src.base_hostname or '(unknown)'}")
     lines.append(f"- output: `{out_path}`")
     lines.append(f"- source sha256: `{src.source_sha256}`")
@@ -184,6 +197,8 @@ def render_report(
     for fixed in _FIXED_FOLLOWUPS:
         if fixed not in followups:
             followups.append(fixed)
+    if src.base_is_default and _DEFAULT_BASE_FOLLOWUP not in followups:
+        followups.append(_DEFAULT_BASE_FOLLOWUP)
     for followup in followups:
         lines.append(f"- [ ] {followup}")
     lines.append("")

@@ -175,3 +175,55 @@ def test_e2e_refuses_output_onto_base(tmp_path: Path, minimal_path: Path, opnsen
         ]
     )
     assert code == 2
+
+
+def test_e2e_migrate_without_base_uses_default(tmp_path: Path, minimal_path: Path) -> None:
+    """§16.3: no ``--base`` merges into the built-in base and the report says so."""
+    out = tmp_path / "out.xml"
+    code = cli.main(
+        [
+            "migrate",
+            str(minimal_path),
+            "-o",
+            str(out),
+            "--select-all-ok",
+            "--map-nic",
+            "em0=igc0",
+            "--map-nic",
+            "em1=igc1",
+        ]
+    )
+    assert code == 0
+    reparsed = etree.fromstring(out.read_bytes())
+    assert reparsed.tag == "opnsense"
+    assert reparsed.findtext("system/hostname") == "pfbox"
+
+    report = (tmp_path / "out.report.md").read_text(encoding="utf-8")
+    assert "built-in default (pf2opn factory base, 26.7)" in report
+    assert "merged into pf2opn's built-in factory base" in report
+
+    src = SourceContext.load(minimal_path)
+    plan = build_plan(src, default_ifmap(src, {"em0": "igc0", "em1": "igc1"}))
+    findings = validate(reparsed, plan)
+    assert [f for f in findings if f.level == "error"] == []
+    assert any(
+        f.level == "warning" and "built-in factory base" in f.message for f in findings
+    )
+
+
+def test_e2e_inspect_without_base(minimal_path: Path, capsys) -> None:
+    """§16.3: ``inspect`` works with no ``--base``."""
+    code = cli.main(["inspect", str(minimal_path), "--json"])
+    assert code == 0
+    assert "system:hostname" in capsys.readouterr().out
+
+
+def test_base_flag_is_optional_for_inspect_and_migrate() -> None:
+    """§9: ``--base`` is optional (one rule for inspect/migrate/tui)."""
+    parser = cli.build_parser()
+    args = parser.parse_args(["inspect", "cfg.xml"])
+    assert args.base is None
+    args = parser.parse_args(["migrate", "cfg.xml", "-o", "out.xml", "--select-all-ok"])
+    assert args.base is None
+    args = parser.parse_args(["tui"])
+    assert args.base is None and args.search_path == []

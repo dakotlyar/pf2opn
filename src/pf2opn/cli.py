@@ -35,12 +35,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = sub.add_parser("inspect", help="list migratable items in a pfSense config")
     inspect.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
-    inspect.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
+    inspect.add_argument(
+        "--base",
+        metavar="BASE",
+        help="base OPNsense config.xml (default: pf2opn's built-in factory base)",
+    )
     inspect.add_argument("--json", action="store_true", help="emit JSON instead of text")
 
     migrate = sub.add_parser("migrate", help="write a migrated OPNsense config.xml")
     migrate.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
-    migrate.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
+    migrate.add_argument(
+        "--base",
+        metavar="BASE",
+        help="base OPNsense config.xml (default: pf2opn's built-in factory base)",
+    )
     migrate.add_argument("-o", "--output", required=True, metavar="OUT", help="output config.xml")
     migrate.add_argument(
         "--report",
@@ -71,7 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     tui.add_argument(
         "--base",
         metavar="BASE",
-        help="base OPNsense config.xml; collected on the Load screen if omitted",
+        help="base OPNsense config.xml (default: pf2opn's built-in factory base); "
+        "collected on the Load screen if omitted",
     )
     tui.add_argument(
         "-o",
@@ -86,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
         "e.g. out.xml -> out.report.md)",
     )
     tui.add_argument("--selection", metavar="FILE", help="selection JSON to load/save")
+    tui.add_argument(
+        "--search-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="add a directory to the Load screen's config search roots (repeatable)",
+    )
     tui.add_argument("--force", action="store_true", help="overwrite an existing OUT")
 
     return parser
@@ -100,14 +116,14 @@ class UsageError(Exception):
 # --------------------------------------------------------------------------- #
 
 
-def _load_source(source: str, base: str) -> SourceContext:
+def _load_source(source: str, base: str | None = None) -> SourceContext:
     try:
         return SourceContext.load(source, base)
     except (OSError, ValueError, etree.XMLSyntaxError) as exc:
         raise UsageError(str(exc)) from exc
 
 
-def _load_plan(source: str, base: str) -> tuple[SourceContext, Plan]:
+def _load_plan(source: str, base: str | None = None) -> tuple[SourceContext, Plan]:
     src = _load_source(source, base)
     ifmap = default_ifmap(src)
     return src, build_plan(src, ifmap)
@@ -277,9 +293,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
         if error:
             raise UsageError(error)
 
-    # Preload the context only when both source and base are known; otherwise
-    # the Load screen builds it once the user supplies them.
-    src = SourceContext.load(source, base) if source and base else None
+    # Preload the context when a source is known; --base is optional (§9), so an
+    # omitted base means the Load screen starts loaded against the built-in base.
+    src = SourceContext.load(source, base) if source is not None else None
 
     from .tui import run
 

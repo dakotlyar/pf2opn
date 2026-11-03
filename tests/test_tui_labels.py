@@ -7,8 +7,12 @@ status is a trailing marker on non-OK items, and sections count their
 
 from __future__ import annotations
 
-from pf2opn.model import Item, Status
+from rich.text import Text
+
+import pf2opn.translators  # noqa: F401  (import side effect: registers translators)
+from pf2opn.model import Item, Plan, Status
 from pf2opn.tui.widgets import (
+    ItemTree,
     is_selectable,
     is_toggleable,
     item_label,
@@ -61,17 +65,17 @@ def test_item_label_uses_label_verbatim() -> None:
 
 def test_section_label_all_selected_is_x() -> None:
     items = [_item("a"), _item("b"), _item("c")]
-    assert section_label("Interfaces", items, {"a", "b", "c"}) == "[x] Interfaces (3/3)"
+    assert section_label("Interfaces", items, {"a", "b", "c"}).plain == "[x] Interfaces (3/3)"
 
 
 def test_section_label_partial_is_dash() -> None:
     items = [_item("a"), _item("b"), _item("c")]
-    assert section_label("Interfaces", items, {"a", "b"}) == "[-] Interfaces (2/3)"
+    assert section_label("Interfaces", items, {"a", "b"}).plain == "[-] Interfaces (2/3)"
 
 
 def test_section_label_none_selected_is_empty() -> None:
     items = [_item("a"), _item("b"), _item("c")]
-    assert section_label("Interfaces", items, set()) == "[ ] Interfaces (0/3)"
+    assert section_label("Interfaces", items, set()).plain == "[ ] Interfaces (0/3)"
 
 
 def test_section_label_all_untranslatable_is_zero_of_zero() -> None:
@@ -79,7 +83,14 @@ def test_section_label_all_untranslatable_is_zero_of_zero() -> None:
         _item("a", status=Status.UNSUPPORTED),
         _item("b", status=Status.UNSUPPORTED),
     ]
-    assert section_label("Cron", items, set()) == "[ ] Cron (0/0)"
+    assert section_label("Cron", items, set()).plain == "[ ] Cron (0/0)"
+
+
+def test_section_label_returns_rich_text_not_str() -> None:
+    """§15 bug: a plain ``str`` label is parsed as Rich markup and loses its bracket."""
+    label = section_label("Interfaces", [_item("a")], {"a"})
+    assert isinstance(label, Text)
+    assert label.plain.startswith("[x]")
 
 
 def test_section_label_excludes_unsupported_from_counts() -> None:
@@ -90,8 +101,8 @@ def test_section_label_excludes_unsupported_from_counts() -> None:
     ]
     selected = {"a", "b", "c"}
     # c can never be selected, so selecting the two selectable items is [x]
-    assert section_label("Mixed", items, selected) == "[x] Mixed (2/2)"
-    assert section_label("Mixed", items, {"a", "c"}) == "[-] Mixed (1/2)"
+    assert section_label("Mixed", items, selected).plain == "[x] Mixed (2/2)"
+    assert section_label("Mixed", items, {"a", "c"}).plain == "[-] Mixed (1/2)"
 
 
 def test_section_label_counts_readonly_interface_items() -> None:
@@ -103,13 +114,44 @@ def test_section_label_counts_readonly_interface_items() -> None:
         _item("iface:opt1", section="interfaces", readonly_selection=True),
     ]
     assert (
-        section_label("Interfaces", items, {"iface:lan", "iface:wan"})
+        section_label("Interfaces", items, {"iface:lan", "iface:wan"}).plain
         == "[-] Interfaces (2/3)"
     )
     assert (
-        section_label("Interfaces", items, {"iface:lan", "iface:wan", "iface:opt1"})
+        section_label(
+            "Interfaces", items, {"iface:lan", "iface:wan", "iface:opt1"}
+        ).plain
         == "[x] Interfaces (3/3)"
     )
+
+
+def test_tree_node_labels_keep_their_bracket() -> None:
+    """§15: ``ItemTree.build`` must render section labels with their bracket.
+
+    Textual's Tree strips ``[x]``/``[-]``/``[ ]`` out of plain-string labels as
+    Rich markup; the node's rendered ``label.plain`` must still contain it.
+    """
+    items = [
+        _item("a", section="system"),
+        _item("b", section="system"),
+        _item("u", section="system", status=Status.UNSUPPORTED),
+    ]
+    plan = Plan(
+        items=items,
+        by_id={item.id: item for item in items},
+        ifmap=None,  # type: ignore[arg-type]
+        selected={"a", "b"},
+        options={},
+    )
+    tree = ItemTree("Migration")
+    tree.build(plan)
+    section_nodes = [node for node in tree.root.children]
+    assert section_nodes, "expected at least one section node"
+    label = section_nodes[0].label
+    assert isinstance(label, Text)
+    assert "[" in label.plain and "]" in label.plain
+    assert label.plain.startswith("[")
+    assert "System" in label.plain
 
 
 def test_item_text_keeps_plain_label_and_colours_only_the_body() -> None:

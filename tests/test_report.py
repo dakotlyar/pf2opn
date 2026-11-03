@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pf2opn.context import SourceContext
+from pf2opn.ifmap import default_ifmap
+from pf2opn.plan import build_plan
 from pf2opn.report import render_report
 from pf2opn.validate import validate
 from pf2opn.writer import build_output, write_output
@@ -103,3 +106,25 @@ def test_validation_findings_include_sanitized_description(tmp_path: Path, minim
     text = render_report(plan, validate(out, plan), src, out_path)
     assert "sanitized" in _validation_section(text)
     assert "lan" in _validation_section(text)
+
+
+def test_report_notes_the_builtin_default_base(tmp_path: Path, minimal_path: Path) -> None:
+    """§14: no ``--base`` is stated in the header and the follow-up checklist."""
+    src = SourceContext.load(minimal_path)
+    plan = build_plan(src, default_ifmap(src, {"em0": "igc0", "em1": "igc1"}))
+    out = build_output(plan, src)
+    out_path = tmp_path / "out.xml"
+    write_output(out, out_path)
+    text = render_report(plan, validate(out, plan), src, out_path)
+    assert "built-in default (pf2opn factory base, 26.7)" in text
+    assert "- [ ] Output was merged into pf2opn's built-in factory base" in text
+
+
+def test_report_does_not_note_a_supplied_base(tmp_path: Path, minimal_plan) -> None:
+    src, plan = minimal_plan
+    out = build_output(plan, src)
+    out_path = tmp_path / "out.xml"
+    write_output(out, out_path)
+    text = render_report(plan, validate(out, plan), src, out_path)
+    assert "built-in default" not in text
+    assert "built-in factory base" not in text

@@ -522,3 +522,23 @@ def test_hybrid_outbound_maps_to_advanced_warning(minimal_plan) -> None:
     )
     warnings = [f for f in validate(out, plan) if f.level == "warning"]
     assert any("hybrid" in f.message and "advanced" in f.message for f in warnings)
+
+
+def test_default_base_is_a_warning(minimal_plan) -> None:
+    """§13: using the built-in factory base is one warning, never an error."""
+    src, plan = minimal_plan
+    plan.options["base_is_default"] = True
+    out = build_output(plan, src)
+    findings = validate(out, plan)
+    assert _errors(findings) == []
+    assert any(
+        f.level == "warning" and "built-in factory base" in f.message for f in findings
+    )
+
+
+def test_supplied_base_is_not_warned(minimal_plan) -> None:
+    src, plan = minimal_plan
+    assert plan.options["base_is_default"] is False
+    out = build_output(plan, src)
+    warnings = [f for f in validate(out, plan) if f.level == "warning"]
+    assert not any("built-in factory base" in f.message for f in warnings)

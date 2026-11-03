@@ -9,11 +9,29 @@ two cannot diverge.
 from __future__ import annotations
 
 import os
+from importlib.resources import files
 from pathlib import Path
 
 from lxml import etree
 
 from . import xmlio
+
+#: Name of the bundled factory base (design §5.1), shipped as package data.
+DEFAULT_BASE_NAME = "base_default.xml"
+
+
+def default_base_bytes() -> bytes:
+    """Read the bundled factory base (design §5.1) from package data.
+
+    Located with :func:`importlib.resources.files` so a wheel/sdist install
+    carries it — never by a path relative to the current working directory.
+    """
+    return (files("pf2opn") / "data" / DEFAULT_BASE_NAME).read_bytes()
+
+
+def load_default_base_root() -> etree._Element:
+    """Parse the bundled factory base and return its ``<opnsense>`` root (§5.1)."""
+    return xmlio.parse_bytes(default_base_bytes(), root="opnsense")
 
 
 def parse_pf_root(path: Path | str) -> etree._Element:
@@ -114,6 +132,9 @@ def check_output(
 
 
 __all__ = [
+    "DEFAULT_BASE_NAME",
+    "default_base_bytes",
+    "load_default_base_root",
     "parse_pf_root",
     "parse_opnsense_root",
     "file_error",

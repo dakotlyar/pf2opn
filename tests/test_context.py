@@ -21,6 +21,7 @@ def test_uuid_is_deterministic_uuid5(minimal_plan) -> None:
 
 def test_source_context_loads_minimal(minimal_path, opnsense_base) -> None:
     src = SourceContext.load(minimal_path, opnsense_base)
+    assert src.base_is_default is False
     assert list(src.pf_ifaces) == ["wan", "lan"]
     assert src.pf_ifaces["wan"].device == "em0"
     assert src.pf_ifaces["lan"].device == "em1"
@@ -31,6 +32,16 @@ def test_source_context_loads_minimal(minimal_path, opnsense_base) -> None:
     assert len(src.source_sha256) == 64
     assert src.alias_names == set()
     assert src.gateway_names == set()
+
+
+def test_source_context_loads_with_default_base(minimal_path) -> None:
+    """No ``--base`` means the bundled factory base, flagged ``base_is_default``."""
+    src = SourceContext.load(minimal_path)
+    assert src.base_is_default is True
+    assert src.base_path is None
+    assert src.base.tag == "opnsense"
+    assert src.base_hostname == "OPNsense"
+    assert src.base.find("trigger_initial_wizard") is None
 
 
 def test_write_context_iface_helpers(minimal_plan) -> None:

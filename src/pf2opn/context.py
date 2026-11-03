@@ -44,23 +44,35 @@ class PfIface:
 @dataclass
 class SourceContext:
     pf: etree._Element  # <pfsense> root
-    base: etree._Element  # <opnsense> root of --base (read-only here)
+    base: etree._Element  # <opnsense> root of --base, or the bundled default
     pf_ifaces: dict[str, PfIface]  # ordered
     alias_names: set[str]
     gateway_names: set[str]
     pf_version: str
     source_path: Path
-    base_path: Path
+    base_path: Path | None  # None when the built-in base was used (§5.1)
     source_sha256: str
     pf_hostname: str = ""
     base_hostname: str = ""
+    base_is_default: bool = False  # True when the built-in base was used (§5.1)
 
     @classmethod
-    def load(cls, src_path: Path | str, base_path: Path | str) -> "SourceContext":
+    def load(
+        cls, src_path: Path | str, base_path: Path | str | None = None
+    ) -> "SourceContext":
         src_path = Path(src_path)
-        base_path = Path(base_path)
         pf = paths.parse_pf_root(src_path)
-        base = paths.parse_opnsense_root(base_path)
+
+        # §5.1: an omitted --base means the bundled factory base. The output is
+        # merged into it exactly as into a supplied export; base_is_default is
+        # declared with the other defaulted fields (§7.4).
+        base_is_default = base_path is None
+        if base_is_default:
+            base = paths.load_default_base_root()
+            base_path = None
+        else:
+            base_path = Path(base_path)
+            base = paths.parse_opnsense_root(base_path)
 
         pf_ifaces = _read_ifaces(pf)
         alias_names = {
@@ -86,6 +98,7 @@ class SourceContext:
             source_sha256=digest,
             pf_hostname=(pf.findtext("system/hostname") or "").strip(),
             base_hostname=(base.findtext("system/hostname") or "").strip(),
+            base_is_default=base_is_default,
         )
 
 

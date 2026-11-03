@@ -62,6 +62,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_versions(out))
     findings.extend(_check_sanitized_descriptions(out, plan))
     findings.extend(_check_outbound_mode(out, plan))
+    findings.extend(_check_default_base(plan))
     return findings
 
 
@@ -871,3 +872,20 @@ def _check_outbound_mode(out: etree._Element, plan: Plan) -> list[Finding]:
     if raw_mode == "hybrid" and mode == "advanced":
         findings.append(Finding("warning", HYBRID_ADVANCED_WARNING, "nat/outbound/mode"))
     return findings
+
+
+def _check_default_base(plan: Plan) -> list[Finding]:
+    """§13 warning: the built-in factory base was used (§5.1/D2).
+
+    Read from ``plan.options`` so the warning is implementable from the ``Plan``
+    alone, like the §14 counting convention.
+    """
+    if plan.options.get("base_is_default"):
+        return [
+            Finding(
+                "warning",
+                "output merged into pf2opn's built-in factory base; interface devices "
+                "and system settings are defaults \u2014 confirm them",
+            )
+        ]
+    return []

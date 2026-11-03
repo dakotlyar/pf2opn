@@ -7,6 +7,7 @@ never cause a file read, a network fetch, or a billion-laughs expansion.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from lxml import etree
@@ -34,6 +35,22 @@ def parse_readonly(path: Path | str) -> etree._ElementTree:
     tree = etree.parse(str(path), _SAFE_PARSER)
     _register_secrets(tree)
     return tree
+
+
+def parse_bytes(data: bytes, root: str | None = None) -> etree._Element:
+    """Parse *data* with the same safe parser as :func:`parse_readonly` (design §5.1).
+
+    Registers secret values like :func:`parse_readonly` and, when *root* is
+    given, requires the root element to have that tag (a :class:`ValueError`
+    otherwise). Used for the bundled default base, which is package data read
+    as bytes rather than a user path.
+    """
+    tree = etree.parse(io.BytesIO(data), _SAFE_PARSER)
+    _register_secrets(tree)
+    element = tree.getroot()
+    if root is not None and element.tag != root:
+        raise ValueError(f"root element is <{element.tag}>, expected <{root}>")
+    return element
 
 
 def _register_secrets(tree: etree._ElementTree) -> None:

@@ -38,7 +38,7 @@ def build_plan(src: SourceContext, ifmap: IfaceMap) -> Plan:
         by_id=by_id,
         ifmap=ifmap,
         selected=set(),
-        options={"keep_base_rules": False},
+        options={"keep_base_rules": False, "base_is_default": src.base_is_default},
     )
     plan.selected = default_ids(plan)
     return plan

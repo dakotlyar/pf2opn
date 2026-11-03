@@ -68,3 +68,13 @@ def test_parse_registers_secret_values(tmp_path: Path) -> None:
     )
     xmlio.parse_readonly(cfg)
     assert "$2y$10$abcdefghijklmno" in secrets.known_secret_values()
+
+
+def test_parse_bytes_registers_secret_values_and_checks_root() -> None:
+    root = xmlio.parse_bytes(
+        b"<opnsense><system><user><password>$2y$10$parsebytesuniquevalue12</password>"
+        b"</user></system></opnsense>",
+        root="opnsense",
+    )
+    assert root.tag == "opnsense"
+    assert "$2y$10$parsebytesuniquevalue12" in secrets.known_secret_values()
