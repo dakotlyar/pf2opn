@@ -1,0 +1,44 @@
+<golden>
+  <placement path="OPNsense/wireguard/client/clients" mode="append">
+    <client uuid="f0362f43-5fa2-54d8-adaa-bab6e5df8244">
+      <enabled>1</enabled>
+      <name>GL.iNet_Slate_Router</name>
+      <pubkey>+2KItINbA1TlNOS/De5oqk6uu5uvPHnZW5+8RRLAprg=</pubkey>
+      <psk>9mJkCtTIB0LnGO2BJXk39zfzxK1/bI6mJUA/UYKMgFw=</psk>
+      <keepalive>25</keepalive>
+      <privkey/>
+      <servers>5aab3564-50ee-5847-b26c-87e0e539de2c</servers>
+      <tunneladdress>10.0.5.21/32</tunneladdress>
+      <serveraddress/>
+      <serverport/>
+    </client>
+  </placement>
+  <placement path="OPNsense/wireguard/client/clients" mode="append">
+    <client uuid="5f85d261-1e2a-535e-891b-f6f3a27cd746">
+      <enabled>1</enabled>
+      <name>Site_B</name>
+      <pubkey>3897oKeKkibEDrhzfRI5T1sBuSiuQl04L/Vz2acE4sE=</pubkey>
+      <psk/>
+      <keepalive/>
+      <privkey/>
+      <servers>5aab3564-50ee-5847-b26c-87e0e539de2c</servers>
+      <tunneladdress>10.0.5.22/32</tunneladdress>
+      <serveraddress/>
+      <serverport/>
+    </client>
+  </placement>
+  <placement path="OPNsense/wireguard/client/clients" mode="append">
+    <client uuid="f6a25936-3169-5fd3-a627-1e35eb224cc6">
+      <enabled>1</enabled>
+      <name>Site_C</name>
+      <pubkey>f0aPI370BKY3ZERyWVoQyGsdESDT5Jz1kFTAgfBIjdo=</pubkey>
+      <psk/>
+      <keepalive/>
+      <privkey/>
+      <servers>5aab3564-50ee-5847-b26c-87e0e539de2c</servers>
+      <tunneladdress>172.16.5.0/24</tunneladdress>
+      <serveraddress/>
+      <serverport/>
+    </client>
+  </placement>
+</golden>

@@ -1,0 +1,15 @@
+<golden>
+  <placement path="OPNsense/Syslog/destinations" mode="append">
+    <destination uuid="c6597e0d-a9e7-5301-a5cf-59d7d053083e">
+      <enabled>1</enabled>
+      <transport>udp4</transport>
+      <hostname>logs.example.test</hostname>
+      <port>514</port>
+      <level/>
+      <facility/>
+      <program/>
+      <rfc5424>0</rfc5424>
+      <description>pf2opn remote syslog</description>
+    </destination>
+  </placement>
+</golden>

@@ -1,0 +1,106 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>wgbox</hostname>
+		<domain>example.test</domain>
+	</system>
+	<interfaces>
+		<wan>
+			<if>em0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+		</wan>
+		<lan>
+			<if>em1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+		<opt1>
+			<if>tun_wg0</if>
+			<descr>ProtonVPN</descr>
+			<enable></enable>
+		</opt1>
+		<opt2>
+			<if>tun_wg1</if>
+			<descr>Smartass Wireguard</descr>
+			<enable></enable>
+			<ipaddr>10.0.5.1</ipaddr>
+			<subnet>24</subnet>
+		</opt2>
+	</interfaces>
+	<gateways>
+		<gateway_item>
+			<name>WG_GW</name>
+			<descr>WireGuard gateway</descr>
+			<interface>opt2</interface>
+			<ipprotocol>inet</ipprotocol>
+			<gateway>10.0.5.254</gateway>
+		</gateway_item>
+	</gateways>
+	<installedpackages>
+		<wireguard>
+			<tunnels>
+				<item>
+					<name>tun_wg0</name>
+					<descr>ProtonVPN</descr>
+					<enabled>yes</enabled>
+					<listenport>51820</listenport>
+					<publickey>gREyzpWj8sVHSX3ssLh2lKQ0Z4k0ln/9c6Ym0iSCGEI=</publickey>
+					<privatekey>9W0a+4d9C4ydeYGOasa9vCynPYCWKHzGYQv9rtMdteI=</privatekey>
+					<addresses>
+						<row>
+							<address>10.2.0.2</address>
+							<mask>32</mask>
+						</row>
+					</addresses>
+				</item>
+				<item>
+					<name>tun_wg1</name>
+					<descr>Smartass Wireguard</descr>
+					<enabled>yes</enabled>
+					<listenport>51821</listenport>
+					<publickey>t3jOu2M0eb9XZyd2n/qRYUYZU26JR0Ts2WXJEbpyiWI=</publickey>
+					<privatekey>U9p6gtrlr0SbxNKoxBDL6xbFxLKCKga6dizBnAyaczc=</privatekey>
+					<mtu>1420</mtu>
+				</item>
+			</tunnels>
+			<peers>
+				<item>
+					<tun>tun_wg1</tun>
+					<descr>GL.iNet Slate Router</descr>
+					<enabled>yes</enabled>
+					<publickey>+2KItINbA1TlNOS/De5oqk6uu5uvPHnZW5+8RRLAprg=</publickey>
+					<presharedkey>9mJkCtTIB0LnGO2BJXk39zfzxK1/bI6mJUA/UYKMgFw=</presharedkey>
+					<persistentkeepalive>25</persistentkeepalive>
+					<allowedips>10.0.5.21/32, 0.0.0.0/0</allowedips>
+				</item>
+				<item>
+					<tun>tun_wg1</tun>
+					<descr>Site B</descr>
+					<enabled>yes</enabled>
+					<publickey>3897oKeKkibEDrhzfRI5T1sBuSiuQl04L/Vz2acE4sE=</publickey>
+					<allowedips>10.0.5.22/32, 192.168.8.0/24</allowedips>
+				</item>
+				<item>
+					<tun>tun_wg1</tun>
+					<descr>Site C</descr>
+					<enabled>yes</enabled>
+					<publickey>f0aPI370BKY3ZERyWVoQyGsdESDT5Jz1kFTAgfBIjdo=</publickey>
+					<allowedips>172.16.5.0/24</allowedips>
+				</item>
+				<item>
+					<tun>unassigned</tun>
+					<descr>Mullvad Wireguard</descr>
+					<enabled>yes</enabled>
+					<publickey>pSt984hcQemGKBWutLW2rt5LcqR5evWqttpJNEnfN1I=</publickey>
+					<persistentkeepalive>25</persistentkeepalive>
+					<allowedips>0.0.0.0/0</allowedips>
+				</item>
+			</peers>
+		</wireguard>
+	</installedpackages>
+</pfsense>

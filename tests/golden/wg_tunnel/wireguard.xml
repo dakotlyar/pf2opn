@@ -1,0 +1,42 @@
+<golden>
+  <placement path="OPNsense/wireguard/server/servers" mode="append">
+    <server uuid="a3e29d69-fbfd-503b-b7b2-acdfb8814ed3">
+      <enabled>1</enabled>
+      <name>ProtonVPN</name>
+      <instance>0</instance>
+      <pubkey>gREyzpWj8sVHSX3ssLh2lKQ0Z4k0ln/9c6Ym0iSCGEI=</pubkey>
+      <privkey>9W0a+4d9C4ydeYGOasa9vCynPYCWKHzGYQv9rtMdteI=</privkey>
+      <port>51820</port>
+      <mtu/>
+      <dns/>
+      <tunneladdress>10.2.0.2/32</tunneladdress>
+      <disableroutes>0</disableroutes>
+      <gateway/>
+      <peers/>
+      <carp_depend_on/>
+      <debug>0</debug>
+      <endpoint/>
+      <peer_dns>0</peer_dns>
+    </server>
+  </placement>
+  <placement path="OPNsense/wireguard/server/servers" mode="append">
+    <server uuid="5aab3564-50ee-5847-b26c-87e0e539de2c">
+      <enabled>1</enabled>
+      <name>Smartass_Wireguard</name>
+      <instance>1</instance>
+      <pubkey>t3jOu2M0eb9XZyd2n/qRYUYZU26JR0Ts2WXJEbpyiWI=</pubkey>
+      <privkey>U9p6gtrlr0SbxNKoxBDL6xbFxLKCKga6dizBnAyaczc=</privkey>
+      <port>51821</port>
+      <mtu>1420</mtu>
+      <dns/>
+      <tunneladdress>10.0.5.1/24</tunneladdress>
+      <disableroutes>1</disableroutes>
+      <gateway>10.0.5.254</gateway>
+      <peers>f0362f43-5fa2-54d8-adaa-bab6e5df8244,5f85d261-1e2a-535e-891b-f6f3a27cd746,f6a25936-3169-5fd3-a627-1e35eb224cc6</peers>
+      <carp_depend_on/>
+      <debug>0</debug>
+      <endpoint/>
+      <peer_dns>0</peer_dns>
+    </server>
+  </placement>
+</golden>

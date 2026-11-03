@@ -97,4 +97,57 @@
 			<password>syntheticsecret</password>
 		</vip>
 	</virtualip>
+	<dyndnses>
+		<dyndns>
+			<enable></enable>
+			<service>cloudflare</service>
+			<host>edge</host>
+			<domainname>example.test</domainname>
+			<username>user@example.test</username>
+			<password>syntheticpassword</password>
+			<interface>wan</interface>
+		</dyndns>
+	</dyndnses>
+	<syslog>
+		<enable></enable>
+		<remoteserver>logs.example.test:514</remoteserver>
+		<filterdescriptions>1</filterdescriptions>
+	</syslog>
+	<cron>
+		<item>
+			<minute>0</minute>
+			<hour>1</hour>
+			<mday>*</mday>
+			<month>*</month>
+			<wday>*</wday>
+			<who>root</who>
+			<command>/etc/rc.update_bogons</command>
+		</item>
+		<item>
+			<minute>5</minute>
+			<hour>*/2</hour>
+			<mday>*</mday>
+			<month>*</month>
+			<wday>*</wday>
+			<who>root</who>
+			<command>/usr/local/pkg/pfblockerng/pfblockerng.sh</command>
+		</item>
+		<item>
+			<minute>30</minute>
+			<hour>2</hour>
+			<mday>*</mday>
+			<month>*</month>
+			<wday>*</wday>
+			<who>root</who>
+			<command>/usr/local/pkg/acme/acme.sh renew</command>
+		</item>
+	</cron>
+	<installedpackages>
+		<pfblockerng>
+			<config></config>
+		</pfblockerng>
+		<package>
+			<name>SyntheticPackage</name>
+		</package>
+	</installedpackages>
 </pfsense>

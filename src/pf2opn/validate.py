@@ -53,6 +53,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_filter_refs(out))
     findings.extend(_check_nat_refs(out))
     findings.extend(_check_dnsmasq(out))
+    findings.extend(_check_wireguard(out))
     findings.extend(_check_unbound(out))
     findings.extend(_check_system_dns_gateways(out))
     findings.extend(_check_versions(out))
@@ -564,6 +565,42 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
                         path,
                     )
                 )
+    return findings
+
+
+def _check_wireguard(out: etree._Element) -> list[Finding]:
+    """§13 check 9: server peers resolve; instances and names are unique."""
+    findings: list[Finding] = []
+    servers = out.findall("OPNsense/wireguard/server/servers/server")
+    clients = out.findall("OPNsense/wireguard/client/clients/client")
+    client_uuids = {client.get("uuid") for client in clients}
+
+    instances: set[str] = set()
+    names: set[str] = set()
+    for server in servers:
+        path = _path_of(server)
+        instance = (server.findtext("instance") or "").strip()
+        if instance in instances:
+            findings.append(Finding("error", f"duplicate WireGuard instance {instance}", path))
+        instances.add(instance)
+        name = (server.findtext("name") or "").strip()
+        if name in names:
+            findings.append(Finding("error", f"duplicate WireGuard server name {name}", path))
+        names.add(name)
+        for token in (part.strip() for part in (server.findtext("peers") or "").split(",")):
+            if token and token not in client_uuids:
+                findings.append(
+                    Finding("error", f"WireGuard server references unknown peer {token}", path)
+                )
+
+    client_names: set[str] = set()
+    for client in clients:
+        name = (client.findtext("name") or "").strip()
+        if name in client_names:
+            findings.append(
+                Finding("error", f"duplicate WireGuard peer name {name}", _path_of(client))
+            )
+        client_names.add(name)
     return findings
 
 

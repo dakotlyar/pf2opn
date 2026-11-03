@@ -14,6 +14,7 @@ from . import __version__
 from .context import SourceContext
 from .model import Plan, Status
 from .registry import all_translators
+from .translators.unsupported import ignored_sections
 from .validate import Finding
 
 _FIXED_FOLLOWUPS = [
@@ -119,6 +120,17 @@ def render_report(
             any_unsupported = True
             lines.append(f"- {item.label} \u2014 {item.reason}")
     if not any_unsupported:
+        lines.append("- (none)")
+    lines.append("")
+
+    # 6b. Not applicable (non-empty sections with no policy, §12.4)
+    lines.append("## Not applicable")
+    lines.append("")
+    ignored = ignored_sections(src.pf)
+    if ignored:
+        for label, reason in ignored:
+            lines.append(f"- {label} \u2014 {reason}")
+    else:
         lines.append("- (none)")
     lines.append("")
 
