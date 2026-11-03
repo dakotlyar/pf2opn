@@ -28,7 +28,8 @@ _PROG = "pf2opn"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=_PROG,
-        description="Migrate a pfSense config.xml onto OPNsense.",
+        description="Migrate a pfSense config.xml onto OPNsense.\n\n"
+        "With no COMMAND, the interactive TUI is launched (same as `pf2opn tui`).",
     )
     parser.add_argument("--version", action="version", version=f"{_PROG} {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -318,8 +319,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.command:
-        parser.print_help()
-        return 2
+        # Bare `pf2opn` (no subcommand) opens the TUI. Re-parse as `tui` so the
+        # namespace carries that subcommand's defaults; `--help`/`-h` and every
+        # explicit subcommand are handled by argparse before this point.
+        args = parser.parse_args(["tui"])
     handler = _HANDLERS[args.command]
     try:
         return handler(args)

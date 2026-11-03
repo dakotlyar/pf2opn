@@ -56,6 +56,30 @@ python3 -m venv .venv
 This installs the `pf2opn` console script (and the `dev` extra: `pytest`,
 `pytest-asyncio`).
 
+## Standalone binary
+
+`pf2opn` can be frozen into a single self-contained **Linux** executable, so it
+runs without a Python venv. The build uses PyInstaller via the `build` extra:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -e '.[build]'
+.venv/bin/pyinstaller pf2opn.spec        # or: bash scripts/build-binary.sh
+```
+
+This writes `./dist/pf2opn` — a single file of roughly **23 MB**. Copy it
+anywhere; it does not depend on the current directory, the venv, or the checkout:
+
+```sh
+./dist/pf2opn                       # opens the TUI (same as `pf2opn tui`)
+./dist/pf2opn migrate SOURCE -o OUT --select-all-ok --map-nic PF=OPN
+```
+
+The bundled factory base (`base_default.xml`) and the TUI stylesheet
+(`app.tcss`), plus Textual's and Rich's own assets, are compiled into the
+binary, so `--base` can still be omitted. It is a Linux build only — there is
+no macOS or Windows target.
+
 ## CLI usage
 
 ```
@@ -66,6 +90,9 @@ pf2opn migrate SOURCE [-o OUT] [--base BASE] [--report REPORT]
 pf2opn tui     [SOURCE] [--base BASE] [-o OUT] [--report REPORT] [--selection FILE]
                [--search-path DIR ...] [--force]
 ```
+
+Running `pf2opn` with **no subcommand launches the TUI** (identical to
+`pf2opn tui`); `--help`/`-h` still prints the help text.
 
 `--base` is **optional** for all three subcommands (see above). For `inspect` and
 `migrate`, `SOURCE` (and `-o` for `migrate`) are still required. For `tui`,
@@ -138,6 +165,7 @@ pf2opn tui [SOURCE] [--base BASE] [-o OUT] [--search-path DIR ...]
 ```
 
 Or just `pf2opn tui` with no arguments — the Load screen asks for the three paths.
+(`pf2opn` with no subcommand at all does the same.)
 `--report` and `--selection` stay flags (the report defaults to `OUT` with its
 suffix replaced by `.report.md`).
 

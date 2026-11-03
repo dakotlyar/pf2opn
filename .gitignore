@@ -2,6 +2,9 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+# PyInstaller build output (pf2opn.spec is committed on purpose).
+/build/
+/dist/
 /local/
 /out/
 config-*.xml
