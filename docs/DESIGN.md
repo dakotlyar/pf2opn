@@ -2,7 +2,9 @@
 
 Status: **design, ready for implementation** (author: Sabine, 2026-11-03; OPNsense facts re-verified against
 `opnsense/core` 26.7.8 the same day — see §19; Dave answered the seven open questions on 2026-11-03 and
-they are folded in as a decisions record — see §18)
+they are folded in as a decisions record — see §18. **Revised 2026-11-03 (§3 D2, §5.1, §9, §10, §13–§17):
+`--base` is now optional with a bundled factory default, the Load screen searches for config files, and the
+Select-tree section label must be a Rich `Text` so its bracket renders** — see the §19 amendment.)
 Target: **OPNsense 26.7.x** (latest stable tag `26.7.8`, released 2026-10-30; `27.1.a` is a dev tag)
 Source: **pfSense config.xml** (`<pfsense><version>24.0</version>` — the pfSense CE 2.7.x/2.8.x config format)
 
@@ -29,7 +31,9 @@ Goals
    status (OK / PARTIAL / UNSUPPORTED), and let the user pick what carries over.
 2. Make **interface/NIC mapping** an explicit step.
 3. Write a new OPNsense `config.xml` by **merging selected items into a base OPNsense
-   config** exported from the target box.
+   config** — the target box's own export when one is supplied, otherwise pf2opn's built-in
+   factory base (§5.1/D2). Both are deep-copied and merged the same way; the report records which
+   one was used (§14).
 4. Write a Markdown migration report (carried over / skipped / not translatable / manual steps)
    that contains **no secrets**.
 5. Offer a non-interactive mode for tests and repeat runs.
@@ -186,7 +190,7 @@ below are written the way they are. Do not "improve" them from memory:
 | # | Decision | Rejected alternatives and why |
 |---|---|---|
 | D1 | **lxml** for all XML. | stdlib ElementTree has no `getparent()` (we need in-place replacement inside the base tree), weaker XPath, and no parser switches to hard-disable entities/DTD/network. lxml 6.x already has cp314 wheels. |
-| D2 | **`--base` is required.** Output = deep copy of base plus the selected items. | Building from scratch or from the bundled `config.xml.sample` would lose the target's real NIC names, root password, model `version` attributes, and firmware/plugin state. A wrong or missing `version` attribute makes OPNsense re-run model migrations on import (for example `MFP1_0_3` deletes `nat/npt`). That fails silently. |
+| D2 | **`--base` is optional for `inspect`, `migrate` and `tui`.** When supplied, output = deep copy of the target export plus the selected items (unchanged). When omitted, output = deep copy of pf2opn's **built-in factory base** (`src/pf2opn/data/base_default.xml`, §5.1) plus the selected items. The report records which base was used and, for the default, says the NIC names/settings must be confirmed (§14). | D2 originally made `--base` **required** so the output kept the target's real NIC names, root password, model `version` attributes and firmware/plugin state, and so a missing/wrong `version` attribute could not make OPNsense silently re-run model migrations on import (e.g. `MFP1_0_3` deletes `nat/npt`). That risk is real, so **a real export is still the recommended path** — it is just no longer mandatory. The built-in base carries the same guard: it is the genuine 26.7 factory config with the 26.7.8 model `version` attributes for every model it contains (Filter `1.0.6`, Dnsmasq `1.0.9`), so import cannot re-run migrations either; the interface-mapping step still runs, and a report note + follow-up (§14) make the default NIC names and the factory root password explicit. **Rejected:** keeping `--base` required (it is exactly what the ask removes, and the default is good enough for a first pass); relaxing it for `tui` only while `migrate`/`inspect` stay strict (a flag whose meaning depends on the subcommand is worse than one consistent rule — see the §19 amendment). |
 | D3 | **Keep pfSense logical interface keys** (`wan`, `lan`, `optN`) in the output and only remap *devices* (`mlxen1` → `igc1`, `mlxen1.10` → `vlan03`, `tun_wg0` → `wg0`). | Re-keying interfaces would mean rewriting every rule, NAT, DHCP, gateway and Unbound reference, with no user benefit. OPNsense uses the same key scheme. |
 | D4 | **Firewall rules → MVC** `OPNsense/Firewall/Filter/rules/rule`. **Outbound NAT → MVC `snatrules`.** **1:1 → MVC `onetoone`.** **Port forwards → `/nat/rule`** (the DNat model lives there). | Writing legacy `<filter><rule>` / `nat/outbound/rule` would work in 26.7, but both are on the way out. The user would then have to run the in-GUI migration assistant anyway. |
 | D5 | **DHCPv4 → Dnsmasq** (`/dnsmasq`, model 1.0.9). One `dhcp_ranges` row per pfSense range; static maps become `hosts` entries. Clear the base's default `dhcp_ranges` for each migrated interface first. | **Kea** was rejected as *this box's* backend (it was the earlier draft): it does not register leases into DNS, which breaks the pfSense `regdhcp`/`regdhcpstatic` behaviour Dave relies on. **Dnsmasq** is the fresh-install default, does DHCPv4/6 + RA, and registers both dynamic and static leases into its own DNS. ISC: plugin and deprecated. Kea remains the only plausible future backend (HA/scalability, §12.3) but is out of scope here. |
@@ -208,7 +212,7 @@ below are written the way they are. Do not "improve" them from memory:
  pfSense ──►│  xmlio.parse │──────────────► │ SourceContext│ (pf root, pf interfaces, base root)
  config.xml └──────────────┘                └──────┬───────┘
  base.xml ───────────────────────────────────────►│
-                                                   ▼
+ (or built-in default when --base omitted, §5.1)   ▼
                       IfaceMap (NIC mapping: TUI screen or --map-nic / JSON)
                                                    │
                                                    ▼
@@ -248,6 +252,8 @@ pf2opn/
 ├── src/pf2opn/
 │   ├── __init__.py            # __version__ = "0.1.0"
 │   ├── __main__.py            # from .cli import main; main()
+│   ├── data/
+│   │   └── base_default.xml   # bundled factory base, package data (§5.1)
 │   ├── cli.py                 # argparse: inspect | migrate | tui
 │   ├── xmlio.py               # safe parse, serialize, small element helpers
 │   ├── secrets.py             # SECRET_TAGS, redact_element(), RedactingFilter
@@ -327,6 +333,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pf2opn.tui" = ["app.tcss"]
+"pf2opn" = ["data/*.xml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -349,6 +356,73 @@ config-*.xml
 !tests/**
 ```
 Real configs live in `local/` (ignored).
+
+### 5.1 Bundled default base (`data/base_default.xml`)
+
+When `--base` is omitted (Load screen, `migrate`, or `inspect`) pf2opn merges into a **built-in
+base** instead of a target export. It ships as **package data** at
+`src/pf2opn/data/base_default.xml`, declared in `pyproject.toml`:
+
+```toml
+[tool.setuptools.package-data]
+"pf2opn" = ["data/*.xml"]
+```
+
+so a wheel/sdist install carries it. It is located at runtime with `importlib.resources` — never
+by a path relative to the CWD:
+
+```python
+# paths.py
+from importlib.resources import files
+DEFAULT_BASE_NAME = "base_default.xml"
+
+def default_base_bytes() -> bytes:
+    return (files("pf2opn") / "data" / DEFAULT_BASE_NAME).read_bytes()
+
+def load_default_base_root() -> etree._Element:
+    return xmlio.parse_bytes(default_base_bytes(), root="opnsense")
+```
+
+`xmlio.parse_bytes` is a small addition to `xmlio.py`: it runs the *same* safe parser
+(`resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True, remove_blank_text=True`)
+over the bytes, registers secrets like `parse_readonly`, and requires the root element. The
+`SourceContext.load(src, base=None)` path calls `load_default_base_root()` and sets
+`base_path=None`, `base_is_default=True` (§7.4). `build_output` is unchanged — it deep-copies
+`src.base` either way (§10).
+
+**Contents — a cleaned copy of the genuine OPNsense 26.7 factory config** (recovered from the
+image at `local/opnsense-factory-config-26.7.xml`, which is git-ignored; the shipped copy is
+committed and is *not* a user's config). It is the same document as the public upstream
+`opnsense/core 26.7.8:src/etc/config.xml.sample` in every field this spec relies on, with these
+edits:
+
+* **Strip `<trigger_initial_wizard/>`** — the wizard must not run again on the imported box.
+* **Strip the `mismatch0`/`mismatch1` placeholder NICs** (`wan.if`, `lan.if`) and set sane
+  defaults: `wan.if = igc0`, `lan.if = igc1` (the common current OPNsense driver, and what the
+  test base uses). These are **placeholders, not the target's NICs** — the report says so (§14)
+  and the interface-map step is where they are confirmed (§15).
+* **Add the 26.7.8 model `version` attributes** for the models the file contains, exactly
+  `versions.MODEL_VERSIONS`: `OPNsense/Firewall/Filter version="1.0.6"` and
+  `dnsmasq version="1.0.9"`. (The stock factory file carries none; `stamp_versions` would set them
+  at write time anyway, so this is belt-and-braces for anyone reading the data file directly, and
+  it is what keeps D2's "no silent model re-migration on import" guarantee true for the default.)
+
+Everything else is kept verbatim, because the translators and tests depend on it:
+
+* the `root` user and `admins` group (see the secret note below);
+* the two default MVC `Filter/rules` allow-LAN rules — so D9 / `--keep-base-rules` has something
+  to replace, and the mainline `replace` policy is exercised against a realistic base;
+* `nat/outbound/mode = automatic`;
+* the two default `dnsmasq` `dhcp_ranges` rows as **siblings** of `<dnsmasq>`, not nested — so
+  M7's "replace the base LAN range" path is exercised (§2.1, §12.1.11);
+* `system/timeservers`, `ntpd/ispool`, `unbound/enable`.
+
+**No secrets.** Verified by inspection: the file contains no private key, PSK, API key,
+certificate, token, or user-chosen password. Its only secret-tagged element is the **public
+factory-default** root bcrypt hash (the password is the documented default `opnsense`; the hash is
+byte-identical to upstream `config.xml.sample`, i.e. world-readable already). It is therefore safe
+to ship; §11's redaction still applies to it like any other `<password>` at runtime, and §14 adds a
+follow-up telling the user to change it. A test pins both facts (§16).
 
 ---
 
@@ -521,13 +595,15 @@ class PfIface:
 @dataclass
 class SourceContext:
     pf: etree._Element                    # <pfsense> root
-    base: etree._Element                  # <opnsense> root of --base (read-only here)
+    base: etree._Element                  # <opnsense> root of --base, or the bundled default
     pf_ifaces: dict[str, PfIface]         # ordered
     alias_names: set[str]                 # all pfSense alias names
     gateway_names: set[str]
     pf_version: str
+    base_is_default: bool = False         # True when the built-in base (§5.1) was used;
+                                          # declare it with the other defaulted fields (after source_path)
     @classmethod
-    def load(cls, src_path: Path, base_path: Path) -> "SourceContext": ...
+    def load(cls, src_path: Path, base_path: Path | None = None) -> "SourceContext": ...
 
 @dataclass
 class WriteContext:
@@ -565,18 +641,27 @@ PF2OPN_NS = uuid.UUID("6f2c1d2e-8a4b-4c1e-9a43-7d0c5e0f2a11")
 ## 9. CLI and selection file
 
 ```
-pf2opn inspect SOURCE --base BASE [--json]
-pf2opn migrate SOURCE --base BASE -o OUT [--report REPORT]
+pf2opn inspect SOURCE [--base BASE] [--json]
+pf2opn migrate SOURCE [-o OUT] [--base BASE] [--report REPORT]
                (--select-all-ok | --selection FILE) [--map-nic PF=OPN ...]
                [--keep-base-rules] [--force]
 pf2opn tui     [SOURCE] [--base BASE] [-o OUT] [--report REPORT]
-               [--selection FILE] [--force]
+               [--selection FILE] [--search-path DIR] [--force]
 ```
-* For `inspect` and `migrate`, `SOURCE`, `--base` (and `-o` for `migrate`) are **required**.
-* For `tui` they are **optional**: any of `SOURCE`, `--base`, `-o` that is omitted is collected in
-  the **Load** screen (§15). A provided flag **pre-fills** the matching Load field; the value the
-  Load screen holds at continue time is what the run uses, so an edit in the TUI supersedes the
-  flag and an untouched field keeps the flag's value.
+* For `inspect` and `migrate`, `SOURCE` (and `-o` for `migrate`) are **required**; `--base` is
+  **optional**. For `tui`, `SOURCE`, `--base` and `-o` are all optional: any of them that is
+  omitted is collected in the **Load** screen (§15). A provided flag **pre-fills** the matching
+  Load field; the value the Load screen holds at continue time is what the run uses, so an edit in
+  the TUI supersedes the flag and an untouched field keeps the flag's value.
+* **`--base` omitted → the built-in factory base is used** (§5.1), for every subcommand, not just
+  `tui`. `SourceContext.load` then sets `base_is_default=True`; the output is merged into it
+  exactly as into a supplied export, and the report states that the built-in base was used and
+  that its NIC names and system settings are defaults to confirm (§14). `--base` supplied keeps
+  today's behaviour (the real export is the base). The CLI does not `stat` the built-in file (it
+  is package data, never a user path), and the `same_file` check for the output skips the base
+  when it is the default (there is no path to collide with).
+* `--search-path DIR` (repeatable, `tui` only) **adds** a directory to the Load screen's config
+  search roots; it does not replace the defaults (§15).
 * `REPORT` defaults to `OUT` with the suffix replaced by `.report.md`. For `tui` the default is
   derived from the **collected** output path (computed after the Load screen loads, not from
   `args.output`); an explicit `--report` always overrides it. `--report` and `--selection` are not
@@ -595,6 +680,8 @@ and the TUI both call it, so flag values and TUI-collected values cannot diverge
   `source_error(path)` / `base_error(path)` wrap them as "message or `None`" for form display.
   `SourceContext.load` calls the parse functions, so "parses with the right root" is defined once and
   `load` and the Load screen agree.
+* `default_base_bytes()` / `load_default_base_root()` — read and parse the bundled base (§5.1), the
+  source of truth for "no `--base`" in the CLI and the Load screen alike.
 * `same_file(a, b)` and `check_output(out, source, base, force)` — the same-file rule and the
   refusals (`out == source`/`base`, skipping any path that is omitted/`None`, and `out exists`
   without `--force`). `cmd_migrate` and `cmd_tui` use them today under other names; the Load screen
@@ -638,6 +725,14 @@ Selection JSON (`selection.py`, version 1):
 ---
 
 ## 10. Writer (`writer.py`)
+
+**The base is whichever `SourceContext.base` resolved to — a supplied export, or the bundled
+default when `--base` was omitted (§5.1).** `build_output` and every base policy below are
+unchanged; the default base is a normal `<opnsense>` document, so `replace`/`merge` act on it
+exactly as on a real export. Two consequences worth naming: D9's `replace` of the filter rules
+removes the **factory's two allow-LAN rules** rather than the user's, and M7's per-interface
+`REMOVE` clears the **factory's default `dnsmasq` LAN range**. `stamp_versions` still only touches
+paths that exist in the output.
 
 ### 10.1 Algorithm
 ```python
@@ -730,6 +825,13 @@ Rules:
    `SourceContext.load` starts, or a secret can reach a log during parsing. While parsing, `xmlio.parse`
    calls `register_secret(text)` for every SECRET_TAGS text longer than 8 chars.
 6. Tests enforce rules 1–3 (§16.4).
+
+The **bundled base** (§5.1) is a special case and is deliberately *not* exempt from the rules
+above: it ships with OPNsense's public factory-default root bcrypt hash, which `register_secret`
+will register when the file is parsed, so it is redacted from Source/Preview/logs like any other
+`<password>`. Shipping it is safe because it is not a user secret — it is the hash upstream
+`config.xml.sample` publishes, for the documented default password `opnsense` — and §14 tells the
+user to change it. No other secret-tagged value is present in the bundled file (§5.1).
 
 ---
 
@@ -1644,15 +1746,23 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
 sanitizing; `nat/outbound/mode` automatic with snat rules present; pfSense `hybrid` outbound NAT
-mapped to OPNsense `advanced` (§12.1.9).
+mapped to OPNsense `advanced` (§12.1.9); **the built-in default base was used** (one warning,
+`"output merged into pf2opn's built-in factory base; interface devices and system settings are
+defaults — confirm them"`, §5.1/§14).
+
+Every check runs against the finished output regardless of base, so the default base is held to
+the same bar: check 3 still requires each `interfaces/*/if` to be non-empty and unique (the
+bundled base's `wan.if=igc0` / `lan.if=igc1` satisfy it until the mapping step rewrites them), and
+check 8 still validates the Dnsmasq rows the default base ships.
 
 ---
 
 ## 14. Report (`report.py`)
 
 `render_report(plan, findings, src, out_path) -> str` (Markdown). Sections in order:
-1. Header: pf2opn version, date, source hostname + pfSense `<version>`, base hostname,
-   output path, SHA-256 of source and output.
+1. Header: pf2opn version, date, source hostname + pfSense `<version>`, base hostname **and base
+   origin** — the supplied export's path, or `built-in default (pf2opn factory base, 26.7)` when
+   `--base` was omitted (`src.base_is_default`, §5.1) — output path, SHA-256 of source and output.
 2. **Interface map** table: pf key | pf descr | pf device → OPN device | included.
 3. **Summary** table per section: migrated / skipped by user / not translatable.
 4. **Migrated** per section: `- label` + indented warnings.
@@ -1682,6 +1792,11 @@ simply not counted.
    * "Verify interface assignments on the console before connecting WAN."
    * "SSH host keys and web GUI certificate fingerprints will differ."
    * "Dynamic DHCP leases are not migrated; clients will re-request."
+   * **Only when the built-in base was used (`src.base_is_default`)**, add:
+     "Output was merged into pf2opn's built-in factory base: interface devices (`igc0`/`igc1`) and
+     system settings are defaults — confirm interface assignments, and change the root password
+     (the factory default is `opnsense`) before connecting." This is the explicit "do not silently
+     look like a target-exported base" note D2 requires.
 9. **Validation findings** (warnings).
 
 The report never includes XML or field values from SECRET_TAGS (§11).
@@ -1699,42 +1814,81 @@ would already be a §11 rule-3 violation, independent of the file mode.
 
 `Pf2OpnApp(App)` gets `(args)` plus an **optional** preloaded `src`. `pf2opn tui` with no paths
 constructs the app without a context and the Load screen builds it on continue; `pf2opn tui SOURCE
---base BASE -o OUT` preloads the context as today and the Load screen starts in the loaded state.
+[--base BASE] [-o OUT]` preloads the context when a source is known (base is now optional, §9) and
+the Load screen starts in the loaded state.
 The app's `output_path`/`report_path` come from the **collected** output after the Load screen runs
 (`report_path` = `--report` if given, else the collected output with `.report.md`); the Review
 screen writes there. Screen flow: `LoadScreen → IfaceMapScreen → SelectScreen → ReviewScreen →
 DoneScreen`. Esc/`b` goes back one screen. `q` quits from anywhere (confirm modal if the selection
 changed); quitting from the Load screen without writing exits 0.
 
-**LoadScreen**: collects/confirms the three paths, then summarises them.
+**LoadScreen**: collects/confirms the source and (optional) base with a **search field**, plus the
+output path, then summarises them.
 
-Three text `Input`s, in order — **pfSense source**, **OPNsense base**, **output** — each pre-filled
-from the matching `tui` flag (`SOURCE`, `--base`, `-o`) when given, else empty. The value collected
-here is what the run uses (a flag pre-fills; an edit supersedes it). Simple `Input`s, **not** a
-filesystem browser: Textual has no built-in file dialog and a custom picker is out of scope.
-`--report` and `--selection` are not fields (they keep their defaults/behaviour — §9).
+**Widgets.** Two `ConfigPathField`s — **pfSense source** and **OPNsense base** — and one plain
+`Input` for **output** (the output is a new file to name, not an existing file to find, so it keeps
+today's field). Each `ConfigPathField` is a `Vertical` holding: a label `Static`; a search `Input`
+(the existing `#load-source` / `#load-base` ids, so the pilot tests keep working) with a
+placeholder; an `OptionList` (`#load-source-list` / `#load-base-list`) of matching `*.xml`
+candidates; and an error `Static` (`#load-source-error` / `#load-base-error`). It exposes `.value`
+(the `Input` text), `.set_error(msg)`, and `.refresh_candidates()`.
 
-Validation, shown as inline error text under the offending field (`paths.source_error` /
-`paths.base_error` / `paths.check_output`, §9):
+**Search model (scan once, filter locally).**
+* **Roots.** On mount, a worker scans a fixed set of roots for `*.xml` files: the current working
+  directory; `~/Downloads`; `~/Desktop`; the home directory (`~`) itself; the parent directory of
+  any path already supplied via a flag (`SOURCE`, `--base`, `-o`) or already resolved in the other
+  field; and every `--search-path DIR` (§9). Roots are de-duplicated, unreadable/missing roots are
+  skipped, and the scan is **depth 1** (the root itself plus its immediate subdirectories), skipping
+  hidden directories and symlinked directories. It never scans `/`. A directory cap (~2000) and a
+  result cap (~200) bound the work; the scan runs **once per root-set** in a `@work(thread=True)`
+  worker and is only re-run on `r`.
+* **Filter.** Typing filters the cached, sorted candidate list in memory — case-insensitive
+  substring on the **file name and the full path** — and re-renders the `OptionList`. This is
+  **debounced** at ~0.15 s (reset on each keystroke) so a fast typist does not rebuild the list per
+  character; the scan itself is *not* re-run per keystroke. Results show a short path (the root
+  prefix collapsed, e.g. `~/Downloads/b…/config.xml`) and are capped at the result cap.
+* **Direct path always works.** A pasted/typed absolute or relative path is used verbatim: the
+  value passes validation through `paths.file_error` whether or not it appeared in a scan. The list
+  is *suggestions only*.
+* **Interaction.** `↑`/`↓` move the `OptionList` highlight (from either the input or the list).
+  `Tab`/`Shift+Tab` cycle label → input → list → the next field's input. `Enter`:
+  * on a highlighted list entry → **pick** it: the entry's path is written into the `Input` (which
+    triggers validation) and focus returns to the `Input`; it does **not** continue;
+  * on the `Input` → **continue** (the existing `action_continue_`), gated on validity.
+  `Esc` clears the focused field's query and the list and returns focus to its `Input` (it does not
+  leave the screen). `r` re-scans the roots.
+* **Nothing matches.** The list renders a single non-selectable row, "No matching .xml files — type
+  a full path", and the field stays usable: a direct path still validates.
+
+`--report` and `--selection` remain non-fields (they keep their defaults/behaviour — §9).
+
+**Validation**, inline under the field (`paths.source_error` / `paths.base_error` /
+`paths.check_output`, §9):
 * **source**: exists, is a readable file, parses, root is `<pfsense>`.
-* **base**: exists, is a readable file, parses, root is `<opnsense>`.
-* **output**: not the same file as source or base, and if it exists then `--force` must be set.
+* **base**: **empty is valid** — it means "use the built-in base" (§5.1). A non-empty value must
+  exist, be readable, parse, and have root `<opnsense>`.
+* **output**: required; not the same file as source or base (the base comparison is skipped while
+  base is empty); if it exists then `--force` must be set.
 
 The cheap filesystem checks (`exists`, `is_file`, not-a-directory, `same_file`, exists + `--force`)
 run on every change; the parse + root check is **debounced** (~0.4 s timer reset on each keystroke)
 so a multi-megabyte config is not reparsed per character. (Rejected: parse on every keystroke — too
-costly; parse only on submit — then `enter` could not be gated on validity.)
+costly; parse only on submit — then `enter` could not be gated on validity.) The search filter has
+its own, shorter debounce above; a directory **scan** only happens once, in a worker.
 
-When source and base parse cleanly the screen loads the context (`SourceContext.load` +
-`build_plan` in a worker) and shows the previous summary — source path, pfSense version, hostname,
-counts per top-level section, base path, base hostname, base version-mismatch warnings, selection
-hash warning. Editing a loaded path clears the summary until it parses again.
+When source (and, if supplied, base) parse cleanly the screen loads the context
+(`SourceContext.load` + `build_plan` in a worker) and shows the previous summary — source path,
+pfSense version, hostname, counts per top-level section, **the base origin** (the supplied path, or
+"built-in default (factory base) — confirm NICs" when the base field is empty), base hostname (or
+`—`), base version-mismatch warnings, selection hash warning. Editing a loaded path clears the
+summary until it parses again.
 
-`enter` (continue) is **disabled** until all three are valid: the binding's action checks validity
-and, while any field is invalid, stays on the screen and focuses the first invalid field (Textual
-has no per-binding `disabled`, so "disabled" is enforced in the action). Keys: `enter` continue
-(loads the context if needed, hands it to the app, pushes `IfaceMapScreen`); `tab`/`shift+tab` move
-between the fields.
+`enter` (continue) is **disabled** until the source and output are valid (**base empty is valid**):
+the binding's action checks validity and, while any field is invalid, stays on the screen and
+focuses the first invalid field (Textual has no per-binding `disabled`, so "disabled" is enforced in
+the action). Keys: `enter` continue (loads the context if needed, hands it to the app, pushes
+`IfaceMapScreen`); `tab`/`shift+tab` move between fields; `↑`/`↓` move the candidate list; `esc`
+clears a search; `r` re-scans the roots.
 
 **IfaceMapScreen**: a `DataTable` with columns `Incl | Key | Description | pfSense device |
 Kind | OPNsense device`. VLAN/WG rows show their derived device (read-only, greyed). Physical
@@ -1809,13 +1963,23 @@ show `[ ]` (the `Kind` column says why). Keys:
         check = "[x]" if selected and is_selectable(item) else "[ ]"
         return f"{check} {item.label}{STATUS_MARKER[item.status]}"
 
-    def section_label(title: str, items: list[Item], selected: set[str]) -> str:
+    def section_label(title: str, items: list[Item], selected: set[str]) -> Text:
         selectable = [i for i in items if is_selectable(i)]
         chosen = sum(1 for i in selectable if i.id in selected)
         total = len(selectable)
         prefix = "[ ]" if total == 0 or chosen == 0 else "[x]" if chosen == total else "[-]"
-        return f"{prefix} {title} ({chosen}/{total})"
+        return Text(f"{prefix} {title} ({chosen}/{total})")   # Text, not str — see below
     ```
+
+    > **Every tree node label must be a Rich `Text`, never a plain `str`** — otherwise Textual's
+    > `Tree` parses it as Rich *markup* and **swallows the brackets**. This is exactly the bug that
+    > landed with the tri-state change: `section_label()` returned `str`, so `[x]`/`[-]`/`[ ]` were
+    > stripped and sections rendered as `System (2/2)`. Item labels were already safe because
+    > `item_text()` builds a `Text` by hand. The fix is to make `section_label()` return `Text`
+    > (as above) **and** to wrap the plain-string group label `_NOT_TRANSLATABLE` in `Text(...)` in
+    > `ItemTree.build()`. Never pass a bare `str` to `Tree.add()`/`add_leaf()` — if a label is ever
+    > built as a `str`, wrap it with `Text(label)` (or use `rich.markup.escape`) so the bracket is
+    > literal. A test pins that a section node's rendered label contains `[`/`]` (§16).
 * Right: `DetailPane` = `TabbedContent` with:
   * "Source": `TextArea(read_only=True, language="xml")` with `redacted_xml(item.source)`.
   * "Preview": the redacted serialization of `render()` placements for this item (path
@@ -1888,6 +2052,13 @@ They're written by hand and modelled on the real structure documented in this sp
   `<dhcp_ranges uuid=…>` for LAN — a sibling, not inside a `dhcp_ranges` wrapper).** Keep that sibling
   shape in the fixture; goldens must assert migrated rows are emitted the same way (§2.1 rule, §12.1.11).
   A nested `dhcp_ranges`/`hosts` wrapper in the fixture would hide the M14 import bug again.
+* `tests/fixtures/opnsense/base_26_7.xml` is the **committed test copy**; the **shipped** default
+  base is a separate file (`src/pf2opn/data/base_default.xml`, §5.1) and is asserted directly: a
+  test loads it via `importlib.resources`, checks the root is `<opnsense>`, that it has no
+  `<trigger_initial_wizard/>` and no `mismatch*` NICs, that `OPNsense/Firewall/Filter@version` is
+  `1.0.6` and `dnsmasq@version` is `1.0.9`, and that its only secret-tagged element is the public
+  factory `<password>` hash. The two files may drift in fixtures-only details; the data file is the
+  one that ships.
 
 ### 16.2 Golden tests (per translator)
 `tests/test_<translator>.py`: load the fixture, build the plan with a fixed ifmap
@@ -1903,6 +2074,9 @@ Each test also asserts the status, warnings count, and deps of the interesting i
 exit 0; the output parses; `validate()` finds no errors; the input file's SHA-256 is unchanged;
 the output mode is `0o600`; the report exists. A second run without `--force` → exit 2.
 Running with `-o` equal to the input → exit 2.
+**Add a default-base e2e:** the same call **without `--base`** must exit 0, parse, validate with no
+errors, and its report must contain the default-base note and follow-up (§14); and `inspect` with
+no `--base` must work and report the default-base warning (§13).
 
 ### 16.4 Secret leakage test
 `tests/test_secrets.py`: collect every SECRET_TAGS text from all fixtures. Run `inspect
@@ -1912,6 +2086,12 @@ of the secret strings (len > 8) appear.
 ### 16.5 TUI tests
 Pilot tests: the mapping screen blocks on an unmapped NIC; space toggles; the dependency
 cascade notification; review shows errors; `w` writes the file.
+**Add (Load search, §15):** typing a fragment filters the candidate `OptionList`; `enter` on a
+highlighted entry fills the `Input` and does not continue; a typed full path is accepted with no
+scan match; an empty base field validates and `enter` reaches the interface map; the "no matches"
+row renders when nothing matches; and the section-label node's rendered text still contains its
+`[x]`/`[-]`/`[ ]` bracket (the bug in §15 — assert on `Tree` node labels, not just on the
+`section_label` return value, so the markup-stripping regression is actually caught).
 
 ### 16.6 Manual acceptance (M14, Dave)
 Run against `local/config-gateway…xml` (never committed) with Dave's real base export. Import the output
@@ -1924,13 +2104,15 @@ Firewall ▸ Rules, NAT, **Dnsmasq DHCP**, Unbound, and WireGuard pages load wit
 
 Each milestone ends with `pytest` green and a commit. "Read" lists the sections needed.
 
-**M0 — Scaffold** (read §0, §5, §11)
-Create pyproject, package skeleton, `xmlio.py` (`parse_readonly(path) -> etree._ElementTree`
-using `etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False,
-huge_tree=True, remove_blank_text=True)`; `to_string(el) -> str`), `secrets.py`, and `cli.py`
-with subcommand stubs.
+**M0 — Scaffold** (read §0, §5, §5.1, §11)
+Create pyproject (including the `"pf2opn" = ["data/*.xml"]` package-data entry), package skeleton,
+the bundled `src/pf2opn/data/base_default.xml` plus `paths.default_base_bytes()`/
+`load_default_base_root()` (§5.1), `xmlio.py` (`parse_readonly(path) -> etree._ElementTree` and
+`parse_bytes(data, root=…)` using `etree.XMLParser(resolve_entities=False, no_network=True,
+load_dtd=False, huge_tree=True, remove_blank_text=True)`; `to_string(el) -> str`), `secrets.py`, and
+`cli.py` with subcommand stubs.
 Accept: `pip install -e .[dev]` works; `pf2opn --help` works; a test that an XXE payload isn't
-expanded; tests for `redact_element`.
+expanded; tests for `redact_element`; and the §16.1 assertions on the bundled data file.
 
 **M1 — Model, registry, contexts, deps, selection, inspect** (§6, §7, §8, §9)
 `model.py`, `context.py`, `registry.py`, `deps.py`, `selection.py`, `plan.py`, the
@@ -1988,16 +2170,19 @@ both reported unsupported; the unsupported items appear in `inspect`.
 
 **M11 — TUI shell: Load + IfaceMap screens** (§15, §9)
 Accept: `pf2opn tui` with no arguments reaches the Load screen; the Load screen collects
-source/base/output, pre-fills provided flags, blocks `enter` with inline errors until all three
-validate (source/base parse with the right root; output not source/base and `--force` honoured),
-then loads the context; `--report`/`--selection` are not collected. Pilot tests for path
-validation and mapping validation and the NIC picker.
+source/base/output, pre-fills provided flags, blocks `enter` with inline errors until the source and
+output validate and the base field is either empty or valid (empty = built-in base, §5.1; output not
+source/base and `--force` honoured), then loads the context; `--report`/`--selection` are not
+collected. Pilot tests for path validation and mapping validation and the NIC picker. (The Load
+screen's **search fields** are added in M16.)
 
 **M12 — TUI Select screen** (§15, §8)
 Accept: pilot tests for toggle, section toggle, cascade confirm, filter, and the detail tabs
 showing redacted text. Unit tests pin the §15 label templates: `item_label` for each
 status/selection case and `section_label`'s bracket + `n/total` (including the
-no-selectable-items `(0/0)` case); the interface-map `Incl` cell is asserted `[x]`/`[ ]`.
+no-selectable-items `(0/0)` case); **`section_label` returns a Rich `Text` and the tree node's
+rendered label still contains its bracket** (the §15 markup-stripping bug); the interface-map
+`Incl` cell is asserted `[x]`/`[ ]`.
 
 **M13 — TUI Review/Write/Done + save selection** (§15, §9)
 Accept: a pilot test writes the output; the saved selection JSON reproduces the identical
@@ -2016,6 +2201,22 @@ pfSense reflect-interface list, mapped keys, comma-joined (`InterfaceField Multi
 package — confirm them before building (the OPNsense target fields *are* verified against the plugin
 model). UPnP (`os-upnp`) and the UDP broadcast relay (`os-udpbroadcastrelay`) **stay Tier 2 for now**, not
 folded into M15.
+
+**M16 — Built-in base, Load-screen search, section-label fix** (§3 D2, §5.1, §7.4, §9, §10, §13–§16)
+The three changes in the §19 amendment, as one self-contained milestone:
+1. **Optional base.** `--base` becomes optional for `inspect`/`migrate`/`tui`; `paths` gains
+   `default_base_bytes()`/`load_default_base_root()`; `xmlio` gains `parse_bytes`; `SourceContext.load`
+   takes `base=None` and sets `base_is_default`; `cli`, `SourceContext` and the Load screen use the
+   default when omitted; the report (header + follow-up) and validation (warning) note the default.
+2. **Load-screen search.** Extract `ConfigPathField` (label + search `Input` + `OptionList` + error
+   `Static`) in `tui/widgets.py`; wire the source/base fields to it; add the root set, the one-shot
+   scan worker, the ~0.15 s filter debounce, the direct-path fallback, the `--search-path` flag, and
+   the `↑`/`↓`/`tab`/`enter`/`esc`/`r` keys.
+3. **Section-label fix.** `section_label()` returns `Text`; `ItemTree.build()` passes `Text` for the
+   group label too, so no tree node label is a bare `str`.
+Accept: the §16.1 data-file assertions; the §16.3 no-`--base` e2e and `inspect`; the M11/M12 accept
+lines; the Load-search and tree-label pilot tests in §16.5; goldens unchanged apart from the report
+note (no translator output changes because the base is a normal `<opnsense>` doc).
 
 ---
 
@@ -2300,4 +2501,46 @@ Three loose ends from the AP-5 / real-config reviews:
   counts) rather than 74 / 37. Non-emitting items (`filter:separator`, `snat:mode`) carry
   `Item.emits=False` (§6) and are listed under a separate **Settings & notes** block; `_section_counts`
   counts `emits and selected` OK/PARTIAL items with no output-tree access and no render at report time.
+
+### 2026-11-03 — optional base, Load-screen search, and the section-label fix
+
+Three requested changes, designed here; no code yet (§17 M16). Decisions and the reasoning:
+
+* **`--base` becomes optional everywhere (D2 revised, §9).** When it is omitted, `inspect`,
+  `migrate` and `tui` merge into a **bundled factory base** (`src/pf2opn/data/base_default.xml`,
+  §5.1) shipped as package data and located with `importlib.resources`. Rationale for relaxing all
+  three rather than `tui` only: a flag whose meaning depends on the subcommand is a worse contract
+  than one consistent rule, and the non-interactive paths still get the default-base report note and
+  the NIC-mapping validation, so a default-base `migrate` is not silent. A real export stays the
+  recommended path (D2 keeps that advice).
+* **The bundled base** is a cleaned copy of the genuine 26.7 factory config recovered at
+  `local/opnsense-factory-config-26.7.xml`. **Verified clean:** its only secret-tagged element is
+  the public factory-default root bcrypt hash, byte-identical to upstream
+  `opnsense/core 26.7.8:src/etc/config.xml.sample` (password `opnsense`), so it is safe to commit;
+  there are no keys, PSKs, tokens or certificates. It strips `<trigger_initial_wizard/>`, replaces
+  the `mismatch0`/`mismatch1` NICs with `igc0`/`igc1`, and bakes the 26.7.8 model `version`
+  attributes (`Filter 1.0.6`, `dnsmasq 1.0.9`) so import cannot silently re-run model migrations.
+  The report and a fixed follow-up state plainly that the built-in base was used and its NIC names,
+  system settings and root password are defaults to confirm (§14). One honest limitation: the
+  `igc0`/`igc1` device names are placeholders chosen as the most common current OPNsense driver —
+  they are **not** derived from the target and must be confirmed on the console (the follow-up says
+  so); there is no way to know the target's NICs without its export.
+* **Load-screen search (§15).** The source and base fields become `ConfigPathField`s: a search
+  `Input` plus an `OptionList` of matching `*.xml` files, with a direct typed/pasted path still
+  accepted via `paths.file_error`. Roots are scanned once (cwd, `~/Downloads`, `~/Desktop`, `~`,
+  already-known path parents, and repeatable `--search-path DIR`), depth 1, capped; typing filters
+  the cached list in memory with a ~0.15 s debounce. The output path stays a plain `Input` (a new
+  file to name, not an existing one to find). `enter` on a list entry picks it (fills the input, no
+  continue); `enter` on the input continues when valid; `esc` clears; `r` rescans.
+* **Section-label bug (§15).** `section_label()` returned `str`, and Textual's `Tree` strips
+  `[x]`/`[-]`/`[ ]` as Rich markup from plain-string labels, so section headers rendered without a
+  bracket. Fix: `section_label()` returns a Rich `Text`, and `ItemTree.build()` wraps every node
+  label (`_NOT_TRANSLATABLE` included) in `Text`/markup-disabled, so no tree label is a bare `str`.
+  A test asserts the rendering, not just the function return.
+
+**Open question for Dave** (the one place the reviewer may want to override): whether `migrate`
+and `inspect` should really relax `--base` too, or keep it required while only `tui` gets the
+default — the design chooses "relax all three" for consistency, but that is a deliberate change to
+the non-interactive contract (a script that previously exited 2 for a missing `--base` now
+succeeds with a default-base output).
 
