@@ -53,6 +53,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_filter_refs(out))
     findings.extend(_check_nat_refs(out))
     findings.extend(_check_dnsmasq(out))
+    findings.extend(_check_unbound(out))
     findings.extend(_check_versions(out))
     return findings
 
@@ -533,6 +534,25 @@ def _check_dnsmasq(out: etree._Element) -> list[Finding]:
                         path,
                     )
                 )
+    return findings
+
+
+def _check_unbound(out: etree._Element) -> list[Finding]:
+    """§13 check 10: every Unbound alias ``host`` relation resolves."""
+    findings: list[Finding] = []
+    host_uuids = {
+        host.get("uuid") for host in out.findall("OPNsense/unboundplus/hosts/host")
+    }
+    for alias in out.findall("OPNsense/unboundplus/aliases/alias"):
+        host = (alias.findtext("host") or "").strip()
+        if host and host not in host_uuids:
+            findings.append(
+                Finding(
+                    "error",
+                    f"Unbound alias references unknown host {host}",
+                    _path_of(alias),
+                )
+            )
     return findings
 
 

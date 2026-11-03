@@ -1,0 +1,111 @@
+<?xml version="1.0"?>
+<pfsense>
+	<version>24.0</version>
+	<system>
+		<hostname>dnsbox</hostname>
+		<domain>example.test</domain>
+		<dnsserver>1.1.1.1</dnsserver>
+		<dnsserver>8.8.8.8</dnsserver>
+		<dns1host>one.one.one.one</dns1host>
+		<dns2host>dns.google</dns2host>
+	</system>
+	<interfaces>
+		<wan>
+			<if>em0</if>
+			<descr>WAN</descr>
+			<enable></enable>
+			<ipaddr>dhcp</ipaddr>
+		</wan>
+		<lan>
+			<if>em1</if>
+			<descr>LAN</descr>
+			<enable></enable>
+			<ipaddr>192.168.1.1</ipaddr>
+			<subnet>24</subnet>
+		</lan>
+	</interfaces>
+	<unbound>
+		<enable></enable>
+		<port>5353</port>
+		<active_interface>lan,lo0,opt9</active_interface>
+		<outgoing_interface>wan</outgoing_interface>
+		<dnssec></dnssec>
+		<regdhcp></regdhcp>
+		<regdhcpstatic></regdhcpstatic>
+		<hideidentity></hideidentity>
+		<hideversion></hideversion>
+		<prefetch></prefetch>
+		<prefetchkey></prefetchkey>
+		<dnssecstripped></dnssecstripped>
+		<serveexpired></serveexpired>
+		<qname-minimisation-strict></qname-minimisation-strict>
+		<msgcachesize>4m</msgcachesize>
+		<outgoing_num_tcp>10</outgoing_num_tcp>
+		<incoming_num_tcp>20</incoming_num_tcp>
+		<cache_max_ttl>86400</cache_max_ttl>
+		<cache_min_ttl>60</cache_min_ttl>
+		<system_domain_local_zone_type>transparent</system_domain_local_zone_type>
+		<forwarding></forwarding>
+		<forward_tls_upstream></forward_tls_upstream>
+		<custom_options>server:
+	private-domain: "example.test"
+	do-not-query-localhost: no</custom_options>
+		<hosts>
+			<host>alderaan</host>
+			<domain>home.asmartass.me</domain>
+			<ip>192.168.1.10</ip>
+			<descr>core host</descr>
+			<aliases>
+				<item>www</item>
+				<item>gw</item>
+			</aliases>
+		</hosts>
+		<hosts>
+			<host>tatooine</host>
+			<domain>home.asmartass.me</domain>
+			<ip>192.168.1.11,192.168.1.12</ip>
+			<descr>multi ip host</descr>
+		</hosts>
+		<hosts>
+			<host>v6host</host>
+			<domain>example.test</domain>
+			<ip>2001:db8::5</ip>
+		</hosts>
+		<domainoverrides>
+			<domain>corp.example.test</domain>
+			<ip>10.0.0.53</ip>
+			<descr>corp resolver</descr>
+		</domainoverrides>
+		<domainoverrides>
+			<domain>doh.example.test</domain>
+			<ip>10.0.0.54@5353</ip>
+			<tls_hostname>doh.example.test</tls_hostname>
+			<descr>tls override</descr>
+		</domainoverrides>
+		<acls>
+			<aclid>1</aclid>
+			<aclname>lan_clients</aclname>
+			<aclaction>allow</aclaction>
+			<description>LAN clients</description>
+			<row>
+				<acl_network>192.168.1.0</acl_network>
+				<mask>24</mask>
+				<description>v4 lan</description>
+			</row>
+			<row>
+				<acl_network>2001:db8::</acl_network>
+				<mask>32</mask>
+			</row>
+		</acls>
+		<acls>
+			<aclid>2</aclid>
+			<aclname>blocked_clients</aclname>
+			<aclaction>refuse nonlocal</aclaction>
+			<description>refused clients</description>
+			<row>
+				<acl_network>10.9.0.0</acl_network>
+				<mask>16</mask>
+			</row>
+		</acls>
+	</unbound>
+</pfsense>

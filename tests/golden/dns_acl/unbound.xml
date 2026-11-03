@@ -1,0 +1,20 @@
+<golden>
+  <placement path="OPNsense/unboundplus/acls" mode="append">
+    <acl uuid="d699a656-4769-5678-b8e2-3b6a8fc4ef34">
+      <enabled>1</enabled>
+      <name>lan_clients</name>
+      <action>allow</action>
+      <networks>192.168.1.0/24,2001:db8::/32</networks>
+      <description>LAN clients</description>
+    </acl>
+  </placement>
+  <placement path="OPNsense/unboundplus/acls" mode="append">
+    <acl uuid="f5aa1e6f-15f3-5a9e-9cbb-192125581f48">
+      <enabled>1</enabled>
+      <name>blocked_clients</name>
+      <action>refuse_non_local</action>
+      <networks>10.9.0.0/16</networks>
+      <description>refused clients</description>
+    </acl>
+  </placement>
+</golden>

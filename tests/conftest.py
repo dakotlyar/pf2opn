@@ -94,6 +94,12 @@ def dhcp_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def unbound_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``unbound.xml`` (fixed NIC map)."""
+    return _fixture_plan("unbound.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"})
+
+
+@pytest.fixture
 def misc_plan(opnsense_base: Path):
     """(SourceContext, Plan) for ``misc.xml``."""
     return _fixture_plan(

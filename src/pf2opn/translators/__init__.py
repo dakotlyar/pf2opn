@@ -12,6 +12,7 @@ from . import (  # noqa: F401
     nat,
     routes,
     system,
+    unbound,
     vips,
     vlans,
 )

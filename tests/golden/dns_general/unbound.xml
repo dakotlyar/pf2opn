@@ -1,0 +1,49 @@
+<golden>
+  <placement path="OPNsense/unboundplus/general/enabled" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/general/port" mode="set">5353</placement>
+  <placement path="OPNsense/unboundplus/general/active_interface" mode="set">lan,lo0</placement>
+  <placement path="OPNsense/unboundplus/general/outgoing_interface" mode="set">wan</placement>
+  <placement path="OPNsense/unboundplus/general/dnssec" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/general/regdhcp" mode="set">0</placement>
+  <placement path="OPNsense/unboundplus/general/regdhcpstatic" mode="set">0</placement>
+  <placement path="OPNsense/unboundplus/general/local_zone_type" mode="set">transparent</placement>
+  <placement path="OPNsense/unboundplus/advanced/hideidentity" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/hideversion" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/dnssecstripped" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/prefetch" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/prefetchkey" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/qnameminstrict" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/serveexpired" mode="set">1</placement>
+  <placement path="OPNsense/unboundplus/advanced/msgcachesize" mode="set">4m</placement>
+  <placement path="OPNsense/unboundplus/advanced/outgoingnumtcp" mode="set">10</placement>
+  <placement path="OPNsense/unboundplus/advanced/incomingnumtcp" mode="set">20</placement>
+  <placement path="OPNsense/unboundplus/advanced/cachemaxttl" mode="set">86400</placement>
+  <placement path="OPNsense/unboundplus/advanced/cacheminttl" mode="set">60</placement>
+  <placement path="OPNsense/unboundplus/forwarding/enabled" mode="set">0</placement>
+  <placement path="OPNsense/unboundplus/dots" mode="append">
+    <dot uuid="15161b34-530c-54cf-8a03-0d016837726e">
+      <enabled>1</enabled>
+      <type>dot</type>
+      <domain/>
+      <server>1.1.1.1</server>
+      <port>853</port>
+      <verify>one.one.one.one</verify>
+      <forward_tcp_upstream>0</forward_tcp_upstream>
+      <forward_first>0</forward_first>
+      <description>pf2opn DoT upstream</description>
+    </dot>
+  </placement>
+  <placement path="OPNsense/unboundplus/dots" mode="append">
+    <dot uuid="bd726a96-01c9-5356-948c-d10be6dfcccb">
+      <enabled>1</enabled>
+      <type>dot</type>
+      <domain/>
+      <server>8.8.8.8</server>
+      <port>853</port>
+      <verify>dns.google</verify>
+      <forward_tcp_upstream>0</forward_tcp_upstream>
+      <forward_first>0</forward_first>
+      <description>pf2opn DoT upstream</description>
+    </dot>
+  </placement>
+</golden>

@@ -1,0 +1,80 @@
+<golden>
+  <placement path="OPNsense/unboundplus/hosts" mode="append">
+    <host uuid="43ef2e2a-bcb3-5126-b2ca-c89ee8bd156d">
+      <enabled>1</enabled>
+      <hostname>alderaan</hostname>
+      <domain>home.asmartass.me</domain>
+      <rr>A</rr>
+      <mxprio/>
+      <mx/>
+      <ttl/>
+      <server>192.168.1.10</server>
+      <txtdata/>
+      <addptr>1</addptr>
+      <description>core host</description>
+    </host>
+  </placement>
+  <placement path="OPNsense/unboundplus/aliases" mode="append">
+    <alias uuid="5f821cae-ef2d-59b7-b67d-bd339bdf9ca6">
+      <enabled>1</enabled>
+      <host>43ef2e2a-bcb3-5126-b2ca-c89ee8bd156d</host>
+      <hostname>www</hostname>
+      <domain>home.asmartass.me</domain>
+      <description>core host</description>
+    </alias>
+  </placement>
+  <placement path="OPNsense/unboundplus/aliases" mode="append">
+    <alias uuid="c3a7e0ef-4b4f-59de-9cbb-efd28758f245">
+      <enabled>1</enabled>
+      <host>43ef2e2a-bcb3-5126-b2ca-c89ee8bd156d</host>
+      <hostname>gw</hostname>
+      <domain>home.asmartass.me</domain>
+      <description>core host</description>
+    </alias>
+  </placement>
+  <placement path="OPNsense/unboundplus/hosts" mode="append">
+    <host uuid="266f4611-4afd-56ef-b85e-aca1ea1e3cb6">
+      <enabled>1</enabled>
+      <hostname>tatooine</hostname>
+      <domain>home.asmartass.me</domain>
+      <rr>A</rr>
+      <mxprio/>
+      <mx/>
+      <ttl/>
+      <server>192.168.1.11</server>
+      <txtdata/>
+      <addptr>1</addptr>
+      <description>multi ip host</description>
+    </host>
+  </placement>
+  <placement path="OPNsense/unboundplus/hosts" mode="append">
+    <host uuid="bc4caf7d-323c-5389-b8ea-c6b65faad913">
+      <enabled>1</enabled>
+      <hostname>tatooine</hostname>
+      <domain>home.asmartass.me</domain>
+      <rr>A</rr>
+      <mxprio/>
+      <mx/>
+      <ttl/>
+      <server>192.168.1.12</server>
+      <txtdata/>
+      <addptr>1</addptr>
+      <description>multi ip host</description>
+    </host>
+  </placement>
+  <placement path="OPNsense/unboundplus/hosts" mode="append">
+    <host uuid="266d3120-391f-50d1-b4e5-2fb13a4b6f08">
+      <enabled>1</enabled>
+      <hostname>v6host</hostname>
+      <domain>example.test</domain>
+      <rr>AAAA</rr>
+      <mxprio/>
+      <mx/>
+      <ttl/>
+      <server>2001:db8::5</server>
+      <txtdata/>
+      <addptr>1</addptr>
+      <description/>
+    </host>
+  </placement>
+</golden>

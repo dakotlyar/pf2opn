@@ -1,0 +1,28 @@
+<golden>
+  <placement path="OPNsense/unboundplus/dots" mode="append">
+    <dot uuid="4385e95f-0dd3-5914-b312-1546c55b1070">
+      <enabled>1</enabled>
+      <type>forward</type>
+      <domain>corp.example.test</domain>
+      <server>10.0.0.53</server>
+      <port/>
+      <verify/>
+      <forward_tcp_upstream>0</forward_tcp_upstream>
+      <forward_first>0</forward_first>
+      <description>corp resolver</description>
+    </dot>
+  </placement>
+  <placement path="OPNsense/unboundplus/dots" mode="append">
+    <dot uuid="e6aea46b-84d3-5b0c-b8c6-67ab7b035f7d">
+      <enabled>1</enabled>
+      <type>dot</type>
+      <domain>doh.example.test</domain>
+      <server>10.0.0.54</server>
+      <port>5353</port>
+      <verify>doh.example.test</verify>
+      <forward_tcp_upstream>0</forward_tcp_upstream>
+      <forward_first>0</forward_first>
+      <description>tls override</description>
+    </dot>
+  </placement>
+</golden>
