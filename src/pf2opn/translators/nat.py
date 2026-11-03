@@ -33,6 +33,23 @@ from .base import (
 from .filter import rule_item_id
 
 
+def _derive_ipprotocol(explicit: str, *addresses: str) -> str:
+    """Derive a NAT rule's IP family from its addresses (design §12.1.9).
+
+    An explicit pfSense ``inet``/``inet6`` is kept. Otherwise the family comes
+    from the address fields: an IPv6 literal or CIDR contains ``:``. Keywords
+    (``any``, ``<key>ip``), alias names and empty values contain no colon and
+    therefore leave the rule ``inet``. pfSense materialises its automatic
+    outbound rules with an empty ``<ipprotocol>``; defaulting those to ``inet``
+    puts an IPv6 source (``::1/128``) in an IPv4 rule, which OPNsense's
+    ``performValidation()`` and ``pfctl`` both reject (the whole ruleset fails
+    to load).
+    """
+    if explicit:
+        return explicit
+    return "inet6" if any(":" in (value or "") for value in addresses) else "inet"
+
+
 # --------------------------------------------------------------------------- #
 # Port forwards (§12.1.8)
 # --------------------------------------------------------------------------- #
@@ -135,7 +152,18 @@ class NatPortForward(Translator):
         if rule.find("nordr") is not None:
             sub(root, "nordr", "1")
         sub(root, "interface", data["interface"])
-        sub(root, "ipprotocol", pf_text(rule, "ipprotocol") or "inet")
+        source_net, _, _ = pf_endpoint(rule.find("source"))
+        destination_net, _, _ = pf_endpoint(rule.find("destination"))
+        sub(
+            root,
+            "ipprotocol",
+            _derive_ipprotocol(
+                pf_text(rule, "ipprotocol"),
+                source_net,
+                destination_net,
+                pf_text(rule, "target"),
+            ),
+        )
         sub(root, "protocol", pf_text(rule, "protocol"))
         for field in ("source", "destination"):
             element = rule.find(field)
@@ -226,18 +254,22 @@ class NatOutbound(Translator):
         outbound = src.pf.find("nat/outbound")
         if outbound is None:
             return []
-        mode = pf_text(outbound, "mode") or "automatic"
+        raw_mode = pf_text(outbound, "mode") or "automatic"
+        mapped_mode, mode_warning = _map_outbound_mode(raw_mode, len(outbound.findall("rule")))
+        mode_warnings = [mode_warning] if mode_warning else []
         items: list[Item] = [
             Item(
                 "snat:mode",
                 self.section,
-                f"Outbound NAT mode: {mode}",
+                f"Outbound NAT mode: {mapped_mode}",
                 outbound,
-                Status.OK,
+                Status.PARTIAL if mode_warnings else Status.OK,
+                warnings=mode_warnings,
+                data={"raw_mode": raw_mode, "mode": mapped_mode},
             )
         ]
 
-        inactive = mode in {"automatic", "disabled"}
+        inactive = raw_mode in {"automatic", "disabled"}
         for index, rule in enumerate(outbound.findall("rule")):
             item_id = f"snat#{index}"
             descr = pf_desc(rule)
@@ -284,7 +316,7 @@ class NatOutbound(Translator):
 
             warnings: list[str] = []
             if inactive:
-                warnings.append(f"rules are inactive in mode {mode}")
+                warnings.append(f"rules are inactive in mode {raw_mode}")
             if pf_text(rule, "poolopts"):
                 warnings.append(
                     "outbound NAT pool options not migrated; re-select the pool option in the GUI"
@@ -342,13 +374,19 @@ class NatOutbound(Translator):
         sub(root, "nosync", opn_bool(rule.find("nosync") is not None))
         sub(root, "sequence", str(data["sequence"]))
         sub(root, "interface", data["interface"])
-        sub(root, "ipprotocol", pf_text(rule, "ipprotocol") or "inet")
-        sub(root, "protocol", (pf_text(rule, "protocol") or "").upper() or "any")
         source_net, source_not = data["source"]
+        destination_net, destination_not = data["destination"]
+        sub(
+            root,
+            "ipprotocol",
+            _derive_ipprotocol(
+                pf_text(rule, "ipprotocol"), source_net, destination_net, data["target"]
+            ),
+        )
+        sub(root, "protocol", (pf_text(rule, "protocol") or "").upper() or "any")
         sub(root, "source_net", source_net)
         sub(root, "source_not", opn_bool(source_not))
         sub(root, "source_port", fix_port(pf_text(rule, "sourceport"), colon_to_dash=True))
-        destination_net, destination_not = data["destination"]
         sub(root, "destination_net", destination_net)
         sub(root, "destination_not", opn_bool(destination_not))
         sub(root, "destination_port", fix_port(pf_text(rule, "dstport"), colon_to_dash=True))
@@ -374,8 +412,36 @@ class NatOutbound(Translator):
         ]
 
     def finalize(self, selected: list[Item], ctx: WriteContext) -> list[Placement]:
-        mode = pf_text(ctx.src.pf.find("nat/outbound"), "mode") or "automatic"
-        return [Placement("nat/outbound/mode", Mode.SET, text=mode)]
+        outbound = ctx.src.pf.find("nat/outbound")
+        raw_mode = pf_text(outbound, "mode") or "automatic"
+        rule_count = len(outbound.findall("rule")) if outbound is not None else 0
+        mapped_mode, _warning = _map_outbound_mode(raw_mode, rule_count)
+        return [Placement("nat/outbound/mode", Mode.SET, text=mapped_mode)]
+
+
+HYBRID_ADVANCED_WARNING = (
+    "pfSense hybrid outbound NAT migrated as OPNsense advanced (manual); "
+    "pfSense's materialized rules are copied verbatim and OPNsense's automatic "
+    "outbound rule set is not generated"
+)
+
+
+def _map_outbound_mode(raw_mode: str, rule_count: int) -> tuple[str, str | None]:
+    """Map pfSense ``nat/outbound/mode`` to OPNsense (design §12.1.9).
+
+    ``hybrid`` with at least one stored rule becomes ``advanced``: pfSense's
+    stored list already contains its materialised automatic rules, so
+    ``advanced`` renders exactly those while suppressing OPNsense's own,
+    different automatic set. ``hybrid`` with no stored rules has nothing to
+    render in ``advanced``, so it becomes ``automatic``; every other mode passes
+    through. Returns ``(mode, warning)``.
+    """
+    mode = (raw_mode or "automatic").strip()
+    if mode == "hybrid":
+        if rule_count >= 1:
+            return "advanced", HYBRID_ADVANCED_WARNING
+        return "automatic", None
+    return mode or "automatic", None
 
 
 def _outbound_target(rule: etree._Element, interface: str, ifmap: IfaceMap) -> tuple[str, str | None]:

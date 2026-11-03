@@ -80,8 +80,10 @@ def test_outbound_rules(nat_plan) -> None:
     _src, plan = nat_plan
     items = _items(plan, "nat_out")
 
-    assert items["snat:mode"].label == "Outbound NAT mode: hybrid"
-    assert items["snat:mode"].status == Status.OK
+    assert items["snat:mode"].label == "Outbound NAT mode: advanced"
+    assert items["snat:mode"].status == Status.PARTIAL
+    assert "hybrid" in items["snat:mode"].warnings[0]
+    assert "advanced" in items["snat:mode"].warnings[0]
 
     assert items["snat#0"].status == Status.OK
     assert items["snat#0"].data["target"] == ""
@@ -115,7 +117,7 @@ def test_outbound_render_poolopts_is_empty(nat_plan) -> None:
 def test_outbound_mode_is_set(nat_plan) -> None:
     src, plan = nat_plan
     out = build_output(plan, src)
-    assert out.findtext("nat/outbound/mode") == "hybrid"
+    assert out.findtext("nat/outbound/mode") == "advanced"
 
 
 def test_outbound_categories_are_dropped_with_a_warning(nat_plan) -> None:
@@ -159,6 +161,87 @@ def test_outbound_disabled_mode_marks_rules_partial(nat_plan) -> None:
     items = _items(plan2, "nat_out")
     assert items["snat#0"].status == Status.PARTIAL
     assert "inactive in mode disabled" in items["snat#0"].warnings[0]
+
+
+def test_outbound_hybrid_with_no_rules_maps_to_automatic(nat_plan) -> None:
+    """§12.1.9: hybrid + 0 rules -> automatic (nothing to render in advanced)."""
+    src, plan = nat_plan
+    outbound = src.pf.find("nat/outbound")
+    for rule in outbound.findall("rule"):
+        outbound.remove(rule)
+    plan2 = build_plan(src, plan.ifmap)
+    mode = _items(plan2, "nat_out")["snat:mode"]
+    assert mode.label == "Outbound NAT mode: automatic"
+    assert mode.warnings == []
+    out = build_output(plan2, src)
+    assert out.findtext("nat/outbound/mode") == "automatic"
+
+
+def test_outbound_derives_ipprotocol_from_address_family(nat_plan) -> None:
+    """§12.1.9: an empty pf ``ipprotocol`` is derived, never defaulted to ``inet``."""
+    src, plan = nat_plan
+    translator = registry.get("nat_out")
+    ctx = WriteContext(src, plan)
+
+    # The first IPv6 rule carries no <ipprotocol> (as pfSense materialises its
+    # automatic rules); ::1/128 must become inet6, not inet.
+    loopback = translator.render(plan.by_id["snat#5"], ctx)[0].element
+    assert loopback.findtext("source_net") == "::1/128"
+    assert loopback.findtext("ipprotocol") == "inet6"
+
+    # An explicit inet6 is kept.
+    explicit = translator.render(plan.by_id["snat#6"], ctx)[0].element
+    assert explicit.findtext("source_net") == "2001:db8::/32"
+    assert explicit.findtext("ipprotocol") == "inet6"
+
+    # No IPv6 source may end up in an inet rule (it makes pfctl drop the ruleset).
+    for item in _items(plan, "nat_out").values():
+        if item.id == "snat:mode" or item.status == Status.UNSUPPORTED:
+            continue
+        element = translator.render(item, ctx)[0].element
+        if ":" in (element.findtext("source_net") or ""):
+            assert element.findtext("ipprotocol") == "inet6"
+
+
+def test_port_forward_derives_ipprotocol_from_address_family(nat_plan) -> None:
+    """§12.1.8: the DNat ``ipprotocol`` is derived from the address family too."""
+    src, plan = nat_plan
+    translator = registry.get("nat_pf")
+    fake_src = type(
+        "Src",
+        (),
+        {
+            "pf": etree.fromstring(
+                "<pfsense><nat><rule>"
+                "<interface>wan</interface>"
+                "<protocol>tcp</protocol>"
+                "<source><address>::1</address></source>"
+                "<destination><any/><port>443</port></destination>"
+                "<target>192.168.1.50</target><local-port>443</local-port>"
+                "</rule></nat></pfsense>"
+            ),
+            "alias_names": set(),
+            "pf_ifaces": {},
+        },
+    )()
+    items = translator.discover(fake_src, plan.ifmap)
+    ctx = WriteContext(src, plan)
+    element = translator.render(items[0], ctx)[0].element
+    assert element.findtext("ipprotocol") == "inet6"
+
+    # An explicit inet still wins over an IPv6-looking source.
+    explicit = etree.fromstring(
+        "<pfsense><nat><rule>"
+        "<interface>wan</interface><ipprotocol>inet</ipprotocol>"
+        "<source><address>::1</address></source>"
+        "<destination><any/><port>443</port></destination>"
+        "<target>192.168.1.50</target><local-port>443</local-port>"
+        "</rule></nat></pfsense>"
+    )
+    fake_src.pf = explicit
+    items = translator.discover(fake_src, plan.ifmap)
+    element = translator.render(items[0], ctx)[0].element
+    assert element.findtext("ipprotocol") == "inet"
 
 
 # --------------------------------------------------------------------------- #

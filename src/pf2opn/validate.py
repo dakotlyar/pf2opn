@@ -16,6 +16,7 @@ from lxml import etree
 from .model import Plan
 from .translators.aliases import ALIAS_NAME_RE
 from .translators.base import sanitize_ifdescr
+from .translators.nat import HYBRID_ADVANCED_WARNING
 from .versions import MODEL_VERSIONS
 
 _VLAN_DEVICE = re.compile(r"^vlan0\d+$")
@@ -53,13 +54,14 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_aliases(out))
     findings.extend(_check_filter_refs(out))
     findings.extend(_check_nat_refs(out))
+    findings.extend(_check_nat_families(out))
     findings.extend(_check_dnsmasq(out))
     findings.extend(_check_wireguard(out))
     findings.extend(_check_unbound(out))
     findings.extend(_check_system_dns_gateways(out))
     findings.extend(_check_versions(out))
     findings.extend(_check_sanitized_descriptions(out, plan))
-    findings.extend(_check_outbound_mode(out))
+    findings.extend(_check_outbound_mode(out, plan))
     return findings
 
 
@@ -486,6 +488,73 @@ def _check_nat_refs(out: etree._Element) -> list[Finding]:
     return findings
 
 
+#: (xpath, rule kind, address fields) for the §13 check-13 family comparison.
+_NAT_FAMILY_CHECKS = (
+    ("nat/rule", "port-forward", ("source/network", "destination/network", "target")),
+    (
+        "OPNsense/Firewall/Filter/snatrules/rule",
+        "outbound NAT",
+        ("source_net", "destination_net", "target"),
+    ),
+    (
+        "OPNsense/Firewall/Filter/onetoone/rule",
+        "1:1 NAT",
+        ("source_net", "destination_net", "external"),
+    ),
+)
+
+
+def _address_family(value: str) -> str | None:
+    """The family a NAT address token constrains, or ``None`` (§13 check 13).
+
+    An IPv6 literal/CIDR contains ``:``; a colon-free IP/CIDR is IPv4. Keywords
+    (``any``, ``(self)``, ``<key>``/``<key>ip``), alias names and empty values
+    constrain neither family.
+    """
+    value = (value or "").strip()
+    if not value or value in {"any", "(self)"}:
+        return None
+    if ":" in value:
+        return "inet6"
+    try:
+        ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return None
+    return "inet"
+
+
+def _check_nat_families(out: etree._Element) -> list[Finding]:
+    """§13 check 13: a NAT rule's ``ipprotocol`` must match its address family.
+
+    Mirrors ``Firewall/Filter.php::performValidation()`` ("Source address type
+    should match selected TCP/IP protocol version"). An IPv6 ``source_net`` such
+    as ``::1/128`` in an ``inet`` rule makes ``pfctl`` reject the whole
+    ``/tmp/rules.debug`` ("rule expands to no valid combination"), so this is an
+    **error**. Only rules that carry an ``ipprotocol`` are checked; the
+    ``onetoone`` model has no such field, so those rules never mismatch.
+    """
+    findings: list[Finding] = []
+    for xpath, kind, fields in _NAT_FAMILY_CHECKS:
+        for rule in out.findall(xpath):
+            ipprotocol = (rule.findtext("ipprotocol") or "").strip()
+            if not ipprotocol:
+                continue
+            ident = _rule_ident(rule, kind)
+            for field in fields:
+                value = (rule.findtext(field) or "").strip()
+                family = _address_family(value)
+                if family is not None and family != ipprotocol:
+                    findings.append(
+                        Finding(
+                            "error",
+                            f"{ident}: {field} {value!r} is {family}, "
+                            f"but ipprotocol is {ipprotocol}",
+                            _path_of(rule),
+                        )
+                    )
+    return findings
+
+
 def _dnsmasq_tag_uuids(out: etree._Element) -> set[str]:
     """The uuid attrs of the ``dhcp_tags`` rows (the relation targets, §13 check 8)."""
     return {
@@ -737,17 +806,28 @@ def _check_sanitized_descriptions(out: etree._Element, plan: Plan) -> list[Findi
     return findings
 
 
-def _check_outbound_mode(out: etree._Element) -> list[Finding]:
-    """§13 warning: ``nat/outbound/mode`` automatic while source-NAT rules exist."""
+def _check_outbound_mode(out: etree._Element, plan: Plan) -> list[Finding]:
+    """§13 warnings: ``automatic`` mode with rules present; ``hybrid``→``advanced``."""
     mode = (out.findtext("nat/outbound/mode") or "").strip()
     rules = out.findall("OPNsense/Firewall/Filter/snatrules/rule")
+    findings: list[Finding] = []
     if mode == "automatic" and rules:
-        return [
+        findings.append(
             Finding(
                 "warning",
                 f"nat/outbound/mode is 'automatic' while {len(rules)} source NAT rule(s) "
                 "are present; those rules are inactive",
                 "nat/outbound/mode",
             )
-        ]
-    return []
+        )
+    raw_mode = next(
+        (
+            item.data.get("raw_mode")
+            for item in plan.items
+            if item.section == "nat_out" and item.id == "snat:mode"
+        ),
+        None,
+    )
+    if raw_mode == "hybrid" and mode == "advanced":
+        findings.append(Finding("warning", HYBRID_ADVANCED_WARNING, "nat/outbound/mode"))
+    return findings

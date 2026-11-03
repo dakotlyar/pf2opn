@@ -169,6 +169,28 @@
 				<poolopts>round-robin</poolopts>
 				<descr>pool option rule</descr>
 			</rule>
+			<rule>
+				<interface>wan</interface>
+				<source>
+					<network>::1/128</network>
+				</source>
+				<destination>
+					<any></any>
+				</destination>
+				<target>wanip</target>
+				<descr>Auto created rule for ISAKMP - localhost to WAN</descr>
+			</rule>
+			<rule>
+				<interface>wan</interface>
+				<ipprotocol>inet6</ipprotocol>
+				<source>
+					<network>2001:db8::/32</network>
+				</source>
+				<destination>
+					<any></any>
+				</destination>
+				<descr>explicit ipv6 rule</descr>
+			</rule>
 		</outbound>
 		<onetoone>
 			<interface>wan</interface>

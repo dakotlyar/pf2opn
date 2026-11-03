@@ -377,3 +377,83 @@ def test_outbound_advanced_with_rules_is_not_warned(minimal_plan) -> None:
     )
     warnings = [f for f in validate(out, plan) if f.level == "warning"]
     assert not any("inactive" in f.message for f in warnings)
+
+
+def test_nat_ipv4_address_in_inet_rule_is_ok(minimal_plan) -> None:
+    """§13 check 13: a colon-free address matches ipprotocol inet."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><snatrules><rule>"
+        "<sequence>10</sequence><ipprotocol>inet</ipprotocol>"
+        "<source_net>192.168.1.0/24</source_net></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_nat_ipv6_address_in_inet6_rule_is_ok(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><snatrules><rule>"
+        "<sequence>10</sequence><ipprotocol>inet6</ipprotocol>"
+        "<source_net>::1/128</source_net></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    assert _errors(validate(out, plan)) == []
+
+
+def test_nat_ipv6_source_in_inet_rule_is_an_error(minimal_plan) -> None:
+    """§13 check 13: `nat ... inet from ::1/128` must be flagged before pfctl."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><snatrules><rule>"
+        "<sequence>10</sequence><description>loopback</description>"
+        "<ipprotocol>inet</ipprotocol>"
+        "<source_net>::1/128</source_net></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any(
+        f.path and f.path.endswith("snatrules/rule")
+        and "::1/128" in f.message
+        and "inet6" in f.message
+        for f in errors
+    )
+
+
+def test_nat_ipv4_target_in_inet6_rule_is_an_error(minimal_plan) -> None:
+    """§13 check 13: the reverse mismatch (IPv4 target, ipprotocol inet6) errors."""
+    _src, plan = minimal_plan
+    out = _el(
+        "<opnsense><OPNsense><Firewall><Filter><onetoone><rule>"
+        "<sequence>10</sequence><ipprotocol>inet6</ipprotocol>"
+        "<source_net>192.168.1.10/32</source_net>"
+        "<destination_net>any</destination_net>"
+        "<external>203.0.113.10/32</external></rule>"
+        "</onetoone></Filter></Firewall></OPNsense></opnsense>"
+    )
+    errors = _errors(validate(out, plan))
+    assert any("192.168.1.10/32" in f.message and "inet" in f.message for f in errors)
+
+
+def test_hybrid_outbound_maps_to_advanced_warning(minimal_plan) -> None:
+    """§13 warning: pfSense hybrid -> OPNsense advanced is surfaced."""
+    src, plan = minimal_plan
+    plan.items.append(
+        type(
+            "Item",
+            (),
+            {
+                "section": "nat_out",
+                "id": "snat:mode",
+                "data": {"raw_mode": "hybrid", "mode": "advanced"},
+            },
+        )()
+    )
+    out = _el(
+        "<opnsense><nat><outbound><mode>advanced</mode></outbound></nat>"
+        "<OPNsense><Firewall><Filter><snatrules><rule><sequence>10</sequence></rule>"
+        "</snatrules></Filter></Firewall></OPNsense></opnsense>"
+    )
+    warnings = [f for f in validate(out, plan) if f.level == "warning"]
+    assert any("hybrid" in f.message and "advanced" in f.message for f in warnings)

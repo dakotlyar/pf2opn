@@ -95,4 +95,52 @@
       <description>pool option rule</description>
     </rule>
   </placement>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="045e0a14-0d76-5334-88d0-c47142f8210c">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>60</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet6</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>::1/128</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target/>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>Auto created rule for ISAKMP - localhost to WAN</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="e4aab5c4-a01f-5388-acf8-4e233b74e8c6">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>70</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet6</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>2001:db8::/32</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target/>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>explicit ipv6 rule</description>
+    </rule>
+  </placement>
 </golden>
