@@ -7,12 +7,33 @@ from pathlib import Path
 
 from lxml import etree
 
-from pf2opn.model import Mode, Placement
-from pf2opn.writer import apply, build_output, stamp_versions, write_output
+from pf2opn.context import WriteContext
+from pf2opn.model import Item, Mode, Placement, Status
+from pf2opn.translators.base import Translator
+from pf2opn.writer import apply, apply_base_policy, build_output, stamp_versions, write_output
 
 
 def _el(xml: str) -> etree._Element:
     return etree.fromstring(xml)
+
+
+class _MergeTranslator(Translator):
+    """Minimal ``merge`` translator used to exercise the base policy (§10.2)."""
+
+    section = "merge_test"
+    title = "Merge test"
+    tier = 1
+    order = 1
+    base_policy = "merge"
+    container = "things"
+
+    def discover(self, src, ifmap):  # pragma: no cover - not exercised here
+        return []
+
+    def identity(self, item: Item) -> str | None:
+        if item.source is None:
+            return None
+        return item.source.findtext("name") or None
 
 
 def test_apply_set_creates_and_updates() -> None:
@@ -91,6 +112,79 @@ def test_build_output_applies_system_and_revision(minimal_plan) -> None:
     assert out.find("system/user[name='root']/password").text.startswith("$2y$10$BASE")
     # the base's default LAN rules survive (filter is not a M2 translator).
     assert len(out.findall("OPNsense/Firewall/Filter/rules/rule")) == 2
+
+
+def test_merge_policy_replaces_matching_base_entry(minimal_plan) -> None:
+    src, plan = minimal_plan
+    out = _el(
+        "<opnsense><things><thing><name>a</name></thing>"
+        "<thing><name>b</name></thing></things></opnsense>"
+    )
+    item = Item(
+        id="merge_test:a",
+        section="merge_test",
+        label="a",
+        source=_el("<thing><name>a</name></thing>"),
+        status=Status.OK,
+    )
+
+    apply_base_policy(out, _MergeTranslator(), [item], WriteContext(src, plan))
+
+    assert [thing.findtext("name") for thing in out.findall("things/thing")] == ["b"]
+    assert item.warnings == ["replaced base entry a"]
+
+
+def test_merge_policy_keeps_unrelated_base_entries_and_adds_no_warning(minimal_plan) -> None:
+    src, plan = minimal_plan
+    out = _el("<opnsense><things><thing><name>b</name></thing></things></opnsense>")
+    item = Item(
+        id="merge_test:a",
+        section="merge_test",
+        label="a",
+        source=_el("<thing><name>a</name></thing>"),
+        status=Status.OK,
+    )
+
+    apply_base_policy(out, _MergeTranslator(), [item], WriteContext(src, plan))
+
+    assert [thing.findtext("name") for thing in out.findall("things/thing")] == ["b"]
+    assert item.warnings == []
+
+
+def test_merge_policy_skips_items_without_identity(minimal_plan) -> None:
+    src, plan = minimal_plan
+    out = _el("<opnsense><things><thing><name>a</name></thing></things></opnsense>")
+    item = Item(
+        id="merge_test:a",
+        section="merge_test",
+        label="a",
+        source=None,
+        status=Status.OK,
+    )
+
+    apply_base_policy(out, _MergeTranslator(), [item], WriteContext(src, plan))
+
+    assert out.findall("things/thing") != []
+    assert item.warnings == []
+
+
+def test_merge_policy_is_idempotent_on_warnings(minimal_plan) -> None:
+    src, plan = minimal_plan
+    out = _el("<opnsense><things><thing><name>a</name></thing></things></opnsense>")
+    item = Item(
+        id="merge_test:a",
+        section="merge_test",
+        label="a",
+        source=_el("<thing><name>a</name></thing>"),
+        status=Status.OK,
+    )
+    translator = _MergeTranslator()
+    ctx = WriteContext(src, plan)
+
+    apply_base_policy(out, translator, [item], ctx)
+    apply_base_policy(out, translator, [item], ctx)
+
+    assert item.warnings == ["replaced base entry a"]
 
 
 def test_build_output_does_not_mutate_base(minimal_plan) -> None:

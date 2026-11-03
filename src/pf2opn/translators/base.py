@@ -37,6 +37,15 @@ class Translator(ABC):
         """
         raise NotImplementedError
 
+    def identity(self, item: Item) -> str | None:
+        """The §10.2 identity key of *item*, or ``None``.
+
+        The writer uses it for the ``merge`` base policy: a base element that
+        shares this key is removed before the item is rendered. Sections that do
+        not use ``merge`` leave the default ``None``.
+        """
+        return None
+
     def render(self, item: Item, ctx: WriteContext) -> list[Placement]:
         """Produce placements for one selected, non-UNSUPPORTED item."""
         return []

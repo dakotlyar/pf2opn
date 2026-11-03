@@ -10,7 +10,7 @@ from pathlib import Path
 from lxml import etree
 
 from .context import SourceContext, WriteContext
-from .model import Mode, Placement, Plan, Status
+from .model import Item, Mode, Placement, Plan, Status
 from .registry import all_translators
 from .versions import MODEL_VERSIONS
 
@@ -115,6 +115,29 @@ def _apply_replace(out: etree._Element, placement: Placement) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _element_identity(translator, element: etree._Element) -> str | None:
+    """The §10.2 identity key of a base element, via the translator's ``identity``.
+
+    Translators read the key from the element, which is also their items'
+    ``source``, so a throwaway :class:`Item` lets one implementation serve both.
+    """
+    probe = Item(id="", section=translator.section, label="", source=element, status=Status.OK)
+    return translator.identity(probe)
+
+
+def _remove_merge_entry(
+    container: etree._Element, translator, key: str
+) -> bool:
+    """Remove the base child whose identity is *key*; return whether one was removed."""
+    for child in list(container):
+        if not isinstance(child.tag, str):  # comments / PIs
+            continue
+        if _element_identity(translator, child) == key:
+            container.remove(child)
+            return True
+    return False
+
+
 def apply_base_policy(out: etree._Element, translator, selected, ctx: WriteContext) -> None:
     policy = translator.base_policy
     if policy == "none":
@@ -129,10 +152,21 @@ def apply_base_policy(out: etree._Element, translator, selected, ctx: WriteConte
                 matches[0].remove(child)
         return
     if policy == "merge":
-        # The base's own entries are kept; removing a base entry that shares an
-        # item's identity key needs a per-translator identity key, which the
-        # first "merge" translator introduces in milestone M3 (§10.2). No M2
-        # translator uses "merge".
+        container = translator.container
+        if not container:
+            return
+        matches = out.xpath(container)
+        if not matches:
+            return
+        container_el = matches[0]
+        for item in selected:
+            key = translator.identity(item)
+            if key is None:
+                continue
+            if _remove_merge_entry(container_el, translator, key):
+                warning = f"replaced base entry {key}"
+                if warning not in item.warnings:
+                    item.warnings.append(warning)
         return
     raise ValueError(f"unknown base_policy {policy!r} on section {translator.section!r}")
 
