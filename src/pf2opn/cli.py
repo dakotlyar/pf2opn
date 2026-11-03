@@ -11,7 +11,7 @@ from typing import Sequence
 
 from lxml import etree
 
-from . import __version__, secrets
+from . import __version__, paths, secrets
 from .context import SourceContext
 from .ifmap import default_ifmap, validate_ifmap
 from .model import Plan, Selection
@@ -62,9 +62,23 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--force", action="store_true", help="overwrite an existing OUT")
 
     tui = sub.add_parser("tui", help="interactive selection and migration")
-    tui.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
-    tui.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
-    tui.add_argument("-o", "--output", required=True, metavar="OUT", help="output config.xml")
+    tui.add_argument(
+        "source",
+        metavar="SOURCE",
+        nargs="?",
+        help="pfSense config.xml to read (read-only); collected on the Load screen if omitted",
+    )
+    tui.add_argument(
+        "--base",
+        metavar="BASE",
+        help="base OPNsense config.xml; collected on the Load screen if omitted",
+    )
+    tui.add_argument(
+        "-o",
+        "--output",
+        metavar="OUT",
+        help="output config.xml; collected on the Load screen if omitted",
+    )
     tui.add_argument(
         "--report",
         metavar="REPORT",
@@ -145,16 +159,6 @@ def _parse_nic_pairs(pairs: list[str]) -> dict[str, str]:
     return mapping
 
 
-def _same_file(a: Path | str, b: Path | str) -> bool:
-    pa, pb = Path(a), Path(b)
-    try:
-        if pa.exists() and pb.exists() and os.path.samefile(pa, pb):
-            return True
-    except OSError:  # pragma: no cover - platform dependent
-        pass
-    return pa.resolve() == pb.resolve()
-
-
 def _report_path(output: str, report: str | None) -> Path:
     if report:
         return Path(report)
@@ -225,11 +229,9 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         )
 
     out_path = Path(args.output)
-    if out_path.exists() and not args.force:
-        raise UsageError(f"{out_path} exists; pass --force to overwrite")
-    for other in (args.source, args.base):
-        if _same_file(out_path, other):
-            raise UsageError(f"refusing to write the output onto {other}")
+    overwrite = paths.check_output(out_path, args.source, args.base, args.force)
+    if overwrite:
+        raise UsageError(overwrite)
     if not out_path.parent.exists():
         raise UsageError(f"cannot write {out_path}: no such directory: {out_path.parent}")
 
@@ -255,17 +257,34 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
-    src = _load_source(args.source, args.base)
+    source = getattr(args, "source", None)
+    base = getattr(args, "base", None)
+    output = getattr(args, "output", None)
 
-    out_path = Path(args.output)
-    for other in (args.source, args.base):
-        if _same_file(out_path, other):
-            raise UsageError(f"refusing to write the output onto {other}")
+    # §9: where a path was passed as a flag, the CLI is authoritative and
+    # validates it before starting the TUI (exit 2, no TUI). Omitted paths are
+    # collected — and validated — on the Load screen instead.
+    if source is not None:
+        error = paths.source_error(source)
+        if error:
+            raise UsageError(error)
+    if base is not None:
+        error = paths.base_error(base)
+        if error:
+            raise UsageError(error)
+    if output is not None:
+        error = paths.check_output(output, source, base, args.force)
+        if error:
+            raise UsageError(error)
+
+    # Preload the context only when both source and base are known; otherwise
+    # the Load screen builds it once the user supplies them.
+    src = SourceContext.load(source, base) if source and base else None
 
     from .tui import run
 
     try:
-        return run(src, args)
+        return run(args, src)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise UsageError(str(exc)) from exc
 

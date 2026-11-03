@@ -19,6 +19,20 @@ Screen {
     width: 1fr;
 }
 
+#load-fields {
+    height: auto;
+}
+
+.load-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.load-error {
+    color: $error;
+    min-height: 1;
+}
+
 #review-errors {
     color: $error;
 }

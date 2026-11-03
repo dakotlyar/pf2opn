@@ -13,11 +13,11 @@ if TYPE_CHECKING:  # pragma: no cover - import for type checkers only
     from ..context import SourceContext
 
 
-def run(src: "SourceContext", args) -> int:
-    """Run the TUI for *src* and return the process exit code."""
+def run(args, src: "SourceContext | None" = None) -> int:
+    """Run the TUI for *args* and an optional preloaded *src*; return the exit code."""
     from .app import Pf2OpnApp
 
-    app = Pf2OpnApp(src, args)
+    app = Pf2OpnApp(args, src)
     app.run()
     return app.return_code if app.return_code is not None else 0
 

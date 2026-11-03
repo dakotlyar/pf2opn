@@ -10,7 +10,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from . import xmlio
+from . import paths
 from .model import Plan
 
 #: Namespace UUID for deterministic item UUIDs (design D7 / §7.4).
@@ -59,13 +59,8 @@ class SourceContext:
     def load(cls, src_path: Path | str, base_path: Path | str) -> "SourceContext":
         src_path = Path(src_path)
         base_path = Path(base_path)
-        pf = xmlio.parse_readonly(src_path).getroot()
-        base = xmlio.parse_readonly(base_path).getroot()
-
-        if pf.tag != "pfsense":
-            raise ValueError(f"{src_path}: root element is <{pf.tag}>, expected <pfsense>")
-        if base.tag != "opnsense":
-            raise ValueError(f"{base_path}: root element is <{base.tag}>, expected <opnsense>")
+        pf = paths.parse_pf_root(src_path)
+        base = paths.parse_opnsense_root(base_path)
 
         pf_ifaces = _read_ifaces(pf)
         alias_names = {

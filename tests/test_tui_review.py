@@ -26,7 +26,7 @@ def _app(fixture: Path, base: Path, output: Path, *, map_nic=(), selection=None,
         map_nic=list(map_nic),
         force=force,
     )
-    return Pf2OpnApp(src, args)
+    return Pf2OpnApp(args, src)
 
 
 async def _goto_review(pilot, app: Pf2OpnApp) -> ReviewScreen:

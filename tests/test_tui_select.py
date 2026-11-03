@@ -22,7 +22,7 @@ def _app(fixture: Path, base: Path, output: Path, *, map_nic=(), selection=None)
         map_nic=list(map_nic),
         force=False,
     )
-    return Pf2OpnApp(src, args)
+    return Pf2OpnApp(args, src)
 
 
 async def _goto_select(pilot, app: Pf2OpnApp) -> SelectScreen:

@@ -53,13 +53,9 @@ class Pf2OpnApp(App[None]):
     SUB_TITLE = "pfSense → OPNsense migration"
     BINDINGS = [("q", "request_quit", "Quit")]
 
-    def __init__(self, src: SourceContext, args) -> None:
+    def __init__(self, args, src: SourceContext | None = None) -> None:
         super().__init__()
-        self.src = src
         self.args = args
-
-        self.output_path = Path(args.output)
-        self.report_path = _report_path(args.output, getattr(args, "report", None))
         self.force = bool(getattr(args, "force", False))
 
         selection_path = getattr(args, "selection", None)
@@ -68,32 +64,16 @@ class Pf2OpnApp(App[None]):
         if self.selection_path is not None and self.selection_path.exists():
             self.loaded_selection = load_selection(self.selection_path)
 
+        #: Set once a source context has been adopted (preloaded here, or
+        #: collected on the Load screen).
+        self.src: SourceContext | None = None
+        self.ifmap: IfaceMap | None = None
+        self.plan: Plan | None = None
+        self.output_path: Path | None = None
+        self.report_path: Path | None = None
+
         #: A loaded selection whose source hash no longer matches (README §9).
-        self.selection_sha_mismatch = bool(
-            self.loaded_selection is not None
-            and self.loaded_selection.source_sha256
-            and self.loaded_selection.source_sha256 != src.source_sha256
-        )
-
-        nic_map: dict[str, str] = {}
-        if self.loaded_selection is not None:
-            nic_map.update(self.loaded_selection.nic_map)
-        nic_map.update(_parse_nic_pairs(list(getattr(args, "map_nic", []) or [])))
-
-        self.ifmap: IfaceMap = default_ifmap(src, nic_map)
-        if self.loaded_selection is not None:
-            for key, spec in self.loaded_selection.interfaces.items():
-                target = self.ifmap.targets.get(key)
-                if target is not None:
-                    target.include = bool(spec.get("include", True))
-
-        self.plan: Plan = build_plan(src, self.ifmap)
-        if self.loaded_selection is not None:
-            try:
-                self.plan.selected = compute_selection(self.plan, self.loaded_selection)
-            except ValueError:
-                # A stale selection (source changed) leaves the defaults in place.
-                pass
+        self.selection_sha_mismatch = False
 
         #: True once the user has changed the selection or the interface map.
         self.selection_changed = False
@@ -101,6 +81,65 @@ class Pf2OpnApp(App[None]):
         self.output = None
         self.findings: list = []
         self.written = False
+
+        if src is not None:
+            ifmap, plan = self.make_plan(src)
+            self.apply_loaded(src, ifmap, plan, getattr(args, "output", None))
+
+    # ------------------------------------------------------------------ #
+    # Source adoption (§15)
+    # ------------------------------------------------------------------ #
+
+    def make_plan(self, src: SourceContext) -> tuple[IfaceMap, Plan]:
+        """Build the initial interface map and plan for *src* (pure; safe in a worker)."""
+        nic_map: dict[str, str] = {}
+        if self.loaded_selection is not None:
+            nic_map.update(self.loaded_selection.nic_map)
+        nic_map.update(_parse_nic_pairs(list(getattr(self.args, "map_nic", []) or [])))
+
+        ifmap: IfaceMap = default_ifmap(src, nic_map)
+        if self.loaded_selection is not None:
+            for key, spec in self.loaded_selection.interfaces.items():
+                target = ifmap.targets.get(key)
+                if target is not None:
+                    target.include = bool(spec.get("include", True))
+
+        plan: Plan = build_plan(src, ifmap)
+        if self.loaded_selection is not None:
+            try:
+                plan.selected = compute_selection(plan, self.loaded_selection)
+            except ValueError:
+                # A stale selection (source changed) leaves the defaults in place.
+                pass
+        return ifmap, plan
+
+    def apply_loaded(
+        self,
+        src: SourceContext,
+        ifmap: IfaceMap,
+        plan: Plan,
+        output: str | Path | None = None,
+    ) -> None:
+        """Adopt a source context and its plan, and (re)derive the write paths."""
+        self.src = src
+        self.ifmap = ifmap
+        self.plan = plan
+        self.selection_sha_mismatch = bool(
+            self.loaded_selection is not None
+            and self.loaded_selection.source_sha256
+            and self.loaded_selection.source_sha256 != src.source_sha256
+        )
+        self.set_output(output)
+
+    def set_output(self, output: str | Path | None) -> None:
+        self.output_path = Path(output) if output else None
+        report_arg = getattr(self.args, "report", None)
+        if self.output_path is not None:
+            self.report_path = _report_path(str(self.output_path), report_arg)
+        elif report_arg:
+            self.report_path = Path(report_arg)
+        else:
+            self.report_path = None
 
     # ------------------------------------------------------------------ #
     # Navigation
