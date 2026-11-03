@@ -376,6 +376,9 @@ class Item:
     followups: list[str] = field(default_factory=list)  # manual steps for the report
     requires_plugin: str | None = None                  # e.g. "os-ddclient"
     readonly_selection: bool = False                    # True for interfaces (toggled on ifmap screen)
+    emits: bool = True                                  # False for note/settings/classifier items that
+                                                        # produce no config object; excluded from the
+                                                        # report's migrated counts (§14)
     data: dict = field(default_factory=dict)            # translator-private normalized values
 
 class Mode(str, Enum):
@@ -1197,9 +1200,25 @@ network-address form.
 | `hideidentity`,`hideversion`,`dnssecstripped`,`prefetch`,`prefetchkey`,`qname-minimisation-strict`→`qnameminstrict`,`serveexpired` | `advanced/<same>` | presence → `1`/`0` |
 | `msgcachesize`,`outgoing_num_tcp`→`outgoingnumtcp`,`incoming_num_tcp`→`incomingnumtcp`,`cache_max_ttl`→`cachemaxttl`,`cache_min_ttl`→`cacheminttl` | `advanced/…` | copy if non-empty |
 | `forwarding` (presence) and **not** `forward_tls_upstream` | `forwarding/enabled` | `1` |
-| `forwarding` **and** `forward_tls_upstream` | `dots/dot[]` | for each `pf:system/dnsserver[i]`: APPEND `dot` (uuid `ctx.uuid("dns:general","dot<i>")`) with `enabled=1`, `type=dot`, `domain` empty, `server`=IP, `port`=`853`, `verify`=`pf:system/dns{i+1}host` (empty allowed), `forward_tcp_upstream=0`, `forward_first=0`, `description`="pf2opn DoT upstream". Also SET `forwarding/enabled`=`0` |
+| `forwarding` **and** `forward_tls_upstream` | `dots/dot[]` | for each **non-loopback/self** `pf:system/dnsserver[i]` (see the note below the table): APPEND `dot` (uuid `ctx.uuid("dns:general","dot<i>")`) with `enabled=1`, `type=dot`, `domain` empty, `server`=IP, `port`=`853`, `verify`=`pf:system/dns{i+1}host` (empty allowed), `forward_tcp_upstream=0`, `forward_first=0`, `description`="pf2opn DoT upstream". Also SET `forwarding/enabled`=`0` |
 | `custom_options` | – | warning "custom options present (<n> lines) not migrated"; followup "re-create in /usr/local/etc/unbound.opnsense.d/*.conf" (never print content) |
 | `enablessl`,`sslcertref`,`tlsport` | – | warning "DNS-over-TLS listener not migrated" |
+
+> **Loopback/self upstreams are skipped.** pfSense's `system/dnsserver` may list the box's own
+> address (`127.0.0.1` and/or one of its interface IPs) because pfSense's own Unbound is a
+> configured resolver — the real config's list begins with `127.0.0.1`. Rendering that as an
+> OPNsense upstream (`dot` `server=127.0.0.1 port=853`, or a plain forward to itself) points at
+> nothing that listens, so it is meaningless and only adds log noise. When turning a
+> `system/dnsserver` value into an Unbound upstream — the `dots/dot[]` DoT list above, and the
+> plain `forwarding/enabled` path that relies on the system nameservers — **skip every
+> loopback/self address**: `127.0.0.0/8`, `::1`, the unspecified `0.0.0.0`/`::`, and any address
+> that is one of the source box's own interface addresses. A `domainoverrides` target that is
+> loopback/self is skipped the same way. Emit one info warning counting how many were skipped.
+> If **every** upstream is skipped, do not leave a `dot`/forward list with no servers: keep
+> `forwarding/enabled`=`0` (Unbound falls back to recursive resolution via root hints) and add a
+> followup to set the real upstream by hand (Services ▸ Unbound ▸ Query Forwarding /
+> DNS-over-TLS). The all-skipped case is not an error — it is the same box that has no external
+> forwarder configured.
 
 **Host overrides** (`dnshost:<host>.<domain>`, translator `dns_host`, base_policy `merge` by
 hostname+domain).
@@ -1549,10 +1568,14 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    `vlan0\d+` exists in `vlans/vlan/vlanif`; every `wg\d+` matches a server `instance`.
 4. **VLAN parents**: every `vlans/vlan/if` equals some `interfaces/*/if` or is in the ifmap's target NIC list.
 5. **Filter / SNAT / 1:1 / DNat references**: every interface token is an output interface
-   key, `wireguard`/`openvpn`/`enc0`, or empty; every `*_net` / `source|destination/network`
-   token is `any`, `(self)`, IP/CIDR, `<key>`/`<key>ip` of an output interface, or an output
-   alias name; every port token is numeric, a range, or a port-alias name; every filter
-   `gateway` is an output gateway name.
+   key, `wireguard`/`openvpn`/`enc0`, or empty; every `*_net` / address token is `any`,
+   `(self)`, IP/CIDR, `<key>`/`<key>ip` of an output interface, or an output alias name;
+   every port token is numeric, a range, or a port-alias name; every filter `gateway` is an
+   output gateway name. For `nat/rule` read the `source`/`destination` **endpoint elements
+   themselves** and validate whichever address child is present — `network` **or** the
+   volatile `address` (a single-host/alias endpoint renders as `<address>`, §12.1.8) — plus
+   `target`. Reading `source/network` / `destination/network` alone silently skips every
+   `<address>` endpoint; this is the same gap check 13 fixes (see below).
 6. **Gateways**: names unique; `interface` exists in output interfaces.
 7. **Static routes**: `gateway` exists.
 8. **Dnsmasq DHCP**: every migrated `<dhcp_ranges>` entry's `interface` is an output interface key; no
@@ -1599,6 +1622,23 @@ mapped to OPNsense `advanced` (§12.1.9).
 2. **Interface map** table: pf key | pf descr | pf device → OPN device | included.
 3. **Summary** table per section: migrated / skipped by user / not translatable.
 4. **Migrated** per section: `- label` + indented warnings.
+4b. **Settings & notes** per section: `- label` + indented warnings, for selected items that emit
+    no config object (see the counting convention below). These are not migrated rules.
+
+**Counting convention — "migrated" counts emitted objects, not items.** The summary's *migrated*
+column counts **items that emit at least one config object**: selected OK/PARTIAL items that
+produce config, not note/settings/classifier items that produce none. A non-emitting item is
+marked `Item.emits=False` (§6); today those are `filter:separator` ("Firewall rule separators")
+and `snat:mode` ("Outbound NAT mode: …"). They are excluded from the migrated count **and** from
+the per-section *Migrated* list, so the reference config reads **Firewall rules 73** and
+**Outbound NAT 36** (matching the emitted `<rule>` objects) instead of the old item counts
+(74 / 37, which read as one rule of data loss). Selected non-emitting items are listed under the
+**Settings & notes** block (item 4b) so nothing is silently dropped. This keeps the count
+implementable from the `Plan` alone — `_section_counts` counts `item.emits and item.id in
+plan.selected` for OK/PARTIAL, with no output-tree access and no `render()` call at report time.
+Skipped-by-user and not-translatable counts are unchanged; a non-emitting item that is skipped is
+simply not counted.
+
 5. **Skipped by user** per section: `- label`.
 6. **Not translatable**: `- label — reason`.
 7. **Plugins to install first**: the unique `requires_plugin` of selected items.
@@ -2108,3 +2148,25 @@ synthetic tests could not (`dhcp_ranges` check 8 passing while the imported rows
   elements themselves (`DNat.xml` stores the address in either `network` or the volatile `address`, so a
   host/alias endpoint rendered as `<address>` was missed); `onetoone/rule` is now an explicit no-op
   because the 1:1 rule has no `ipprotocol` field.
+
+### 2026-11-03 — final review amendments (check 5, Unbound loopback upstreams, report counting)
+
+Three loose ends from the AP-5 / real-config reviews:
+
+* **§13 check 5** now mirrors the check-13 fix: `nat/rule` reference validation reads the
+  `source`/`destination` endpoint elements themselves (`network` **or** the volatile `address`) plus
+  `target`, not `source/network`/`destination/network` alone. (Implementation note for the follow-up
+  diff: `validate._check_nat_refs` still passes `("source/network", "destination/network", "target")`
+  and must be changed to the same endpoint walk as `_nat_endpoint_addresses`.)
+* **§12.1.13** now states that loopback/self `system/dnsserver` values (`127.0.0.0/8`, `::1`,
+  unspecified, or a source-box interface address — the real config starts with `127.0.0.1`) are
+  skipped when building Unbound upstreams (`dots/dot[]`, the plain forwarding path, and a
+  loopback `domainoverrides` target), with an info warning; if every upstream is skipped, forwarding
+  stays `0` (recursive resolution) plus a followup. Rationale: a DoT upstream of `127.0.0.1:853`
+  listens to nothing and only makes log noise.
+* **§14** now defines the counting convention: section "migrated" counts **emitted objects**, so the
+  reference config reads Firewall rules **73** / Outbound NAT **36** (matching the emitted `<rule>`
+  counts) rather than 74 / 37. Non-emitting items (`filter:separator`, `snat:mode`) carry
+  `Item.emits=False` (§6) and are listed under a separate **Settings & notes** block; `_section_counts`
+  counts `emits and selected` OK/PARTIAL items with no output-tree access and no render at report time.
+
