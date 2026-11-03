@@ -51,6 +51,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_routes(out))
     findings.extend(_check_aliases(out))
     findings.extend(_check_filter_refs(out))
+    findings.extend(_check_nat_refs(out))
     findings.extend(_check_versions(out))
     return findings
 
@@ -317,6 +318,112 @@ def _check_filter_refs(out: etree._Element) -> list[Finding]:
             findings.append(
                 Finding("error", f"filter rule uses unknown gateway {gateway}", path)
             )
+    return findings
+
+
+def _check_interface_tokens(
+    value: str, iface_keys: set[str], findings: list[Finding], path: str
+) -> None:
+    for token in (part.strip() for part in value.split(",")):
+        if token and token not in iface_keys and token not in _VPN_IFACE_TOKENS:
+            findings.append(
+                Finding("error", f"rule references unknown interface {token}", path)
+            )
+
+
+def _check_net_fields(
+    element: etree._Element,
+    fields: tuple[str, ...],
+    iface_keys: set[str],
+    aliases: set[str],
+    findings: list[Finding],
+    path: str,
+) -> None:
+    for field in fields:
+        value = (element.findtext(field) or "").strip()
+        for token in (part.strip() for part in value.split(",")):
+            if token and not _net_token_ok(token, iface_keys, aliases):
+                findings.append(
+                    Finding(
+                        "error",
+                        f"rule {field} references unknown token {token}",
+                        path,
+                    )
+                )
+
+
+def _check_port_fields(
+    element: etree._Element,
+    fields: tuple[str, ...],
+    aliases: set[str],
+    findings: list[Finding],
+    path: str,
+) -> None:
+    for field in fields:
+        value = (element.findtext(field) or "").strip()
+        if value and not _port_token_ok(value, aliases):
+            findings.append(
+                Finding("error", f"rule {field} is not a valid port {value!r}", path)
+            )
+
+
+def _check_nat_refs(out: etree._Element) -> list[Finding]:
+    """§13 check 5 (NAT part): DNat, source-NAT and 1:1 references resolve."""
+    findings: list[Finding] = []
+    iface_keys = _output_iface_keys(out)
+    aliases = _output_alias_names(out)
+
+    for rule in out.findall("nat/rule"):
+        path = _path_of(rule)
+        _check_interface_tokens(
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+        )
+        _check_net_fields(
+            rule,
+            ("source/network", "destination/network", "target"),
+            iface_keys,
+            aliases,
+            findings,
+            path,
+        )
+        _check_port_fields(
+            rule, ("source/port", "destination/port", "local-port"), aliases, findings, path
+        )
+
+    for rule in out.findall("OPNsense/Firewall/Filter/snatrules/rule"):
+        path = _path_of(rule)
+        _check_interface_tokens(
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+        )
+        _check_net_fields(
+            rule,
+            ("source_net", "destination_net", "target"),
+            iface_keys,
+            aliases,
+            findings,
+            path,
+        )
+        _check_port_fields(
+            rule,
+            ("source_port", "destination_port", "target_port"),
+            aliases,
+            findings,
+            path,
+        )
+
+    for rule in out.findall("OPNsense/Firewall/Filter/onetoone/rule"):
+        path = _path_of(rule)
+        _check_interface_tokens(
+            (rule.findtext("interface") or "").strip(), iface_keys, findings, path
+        )
+        _check_net_fields(
+            rule,
+            ("source_net", "destination_net", "external"),
+            iface_keys,
+            aliases,
+            findings,
+            path,
+        )
     return findings
 
 

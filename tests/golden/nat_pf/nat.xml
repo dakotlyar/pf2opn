@@ -1,0 +1,57 @@
+<golden>
+  <placement path="nat" mode="append">
+    <rule uuid="1a2f668a-6be7-5a2b-9e14-3c2dd1399d70">
+      <sequence>10</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>tcp</protocol>
+      <source>
+        <any/>
+      </source>
+      <destination>
+        <network>wanip</network>
+        <port>8443</port>
+      </destination>
+      <target>192.168.1.50</target>
+      <local-port>443</local-port>
+      <descr>web forward</descr>
+    </rule>
+  </placement>
+  <placement path="nat" mode="append">
+    <rule uuid="4fdf272b-f097-5da7-a064-5d64331f0bf2">
+      <sequence>20</sequence>
+      <interface>lan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>tcp</protocol>
+      <source>
+        <any/>
+      </source>
+      <destination>
+        <network>lanip</network>
+        <port>8080</port>
+      </destination>
+      <target>WEBSERVER</target>
+      <local-port>80</local-port>
+      <descr>alias forward</descr>
+    </rule>
+  </placement>
+  <placement path="nat" mode="append">
+    <rule uuid="4836254c-b717-5f0d-be6e-d3248683669a">
+      <sequence>30</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>udp</protocol>
+      <source>
+        <any/>
+      </source>
+      <destination>
+        <network>wanip</network>
+        <port>5353</port>
+      </destination>
+      <target>192.168.1.60</target>
+      <local-port>53</local-port>
+      <natreflection>purenat</natreflection>
+      <descr>reflection forward</descr>
+    </rule>
+  </placement>
+</golden>

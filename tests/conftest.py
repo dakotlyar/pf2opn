@@ -76,6 +76,16 @@ def filter_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def nat_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``nat.xml`` (fixed NIC map)."""
+    return _fixture_plan(
+        "nat.xml",
+        opnsense_base,
+        {"em0": "igc0", "em1": "igc1", "em2": "igc2", "em3": "igc3"},
+    )
+
+
+@pytest.fixture
 def misc_plan(opnsense_base: Path):
     """(SourceContext, Plan) for ``misc.xml``."""
     return _fixture_plan(

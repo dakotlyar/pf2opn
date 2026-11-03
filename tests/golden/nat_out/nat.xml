@@ -1,0 +1,98 @@
+<golden>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="53c5b3e2-86c3-58d7-b315-48abd9d054e9">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>10</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>lan</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target/>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>wan interface address</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="6ef2be31-563b-51b5-af4e-b91d908c9640">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>20</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>lan</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target>opt7ip</target>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>opt7 interface address</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="02b6f435-2a1e-5862-ad82-bcee108cd797">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>40</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>any</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target>192.0.2.5/24</target>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>other subnet</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/snatrules" mode="append">
+    <rule uuid="37487a74-175c-558f-b467-7d822434d672">
+      <enabled>1</enabled>
+      <nonat>0</nonat>
+      <nosync>0</nosync>
+      <sequence>50</sequence>
+      <interface>wan</interface>
+      <ipprotocol>inet</ipprotocol>
+      <protocol>any</protocol>
+      <source_net>lan</source_net>
+      <source_not>0</source_not>
+      <source_port/>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <destination_port/>
+      <target/>
+      <target_port/>
+      <poolopts/>
+      <poolopts_sourcehashkey/>
+      <staticnatport>0</staticnatport>
+      <log>0</log>
+      <description>pool option rule</description>
+    </rule>
+  </placement>
+</golden>

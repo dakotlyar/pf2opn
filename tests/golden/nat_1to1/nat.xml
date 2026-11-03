@@ -1,0 +1,33 @@
+<golden>
+  <placement path="OPNsense/Firewall/Filter/onetoone" mode="append">
+    <rule uuid="43f0d71e-1553-541b-b622-848b2fa64323">
+      <enabled>1</enabled>
+      <log>0</log>
+      <sequence>10</sequence>
+      <interface>wan</interface>
+      <type>binat</type>
+      <source_net>192.168.1.10/32</source_net>
+      <source_not>0</source_not>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <external>203.0.113.10/32</external>
+      <description>one to one host</description>
+    </rule>
+  </placement>
+  <placement path="OPNsense/Firewall/Filter/onetoone" mode="append">
+    <rule uuid="b5bfe1fa-aceb-52f3-ab93-0560fa883fe2">
+      <enabled>1</enabled>
+      <log>0</log>
+      <sequence>20</sequence>
+      <interface>wan</interface>
+      <type>binat</type>
+      <source_net>10.0.5.0/24</source_net>
+      <source_not>0</source_not>
+      <destination_net>any</destination_net>
+      <destination_not>0</destination_not>
+      <external>203.0.113.0/24</external>
+      <natreflection>disable</natreflection>
+      <description>one to one subnet</description>
+    </rule>
+  </placement>
+</golden>
