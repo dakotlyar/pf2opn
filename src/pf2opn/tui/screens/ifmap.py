@@ -120,9 +120,9 @@ class IfaceMapScreen(AppScreen):
 
     @staticmethod
     def _incl_text(kind: str, include: bool) -> str:
-        if kind == "unsupported":
-            return "\u2013"
-        return "[x]" if include else "[ ]"
+        # §15: every row is bracketed so the Incl column aligns; an
+        # ``unsupported`` row is always excluded (the Kind column says why).
+        return "[ ]" if kind == "unsupported" else ("[x]" if include else "[ ]")
 
     def _cursor_key(self) -> str | None:
         table = self.query_one("#ifmap-table", DataTable)

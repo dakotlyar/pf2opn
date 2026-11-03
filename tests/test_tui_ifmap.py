@@ -154,4 +154,4 @@ async def test_space_refused_for_unsupported_device(
         await pilot.press("space")
         await pilot.pause()
         assert app.ifmap.targets["opt3"].include is False
-        assert table.get_row("opt3")[0] == "\u2013"
+        assert table.get_row("opt3")[0] == "[ ]"

@@ -138,9 +138,15 @@ anywhere (with a confirmation if the selection changed and nothing was written).
      free text); applies to every row using that pfSense NIC
    * `c` continue (runs the mapping validation; errors are shown and you stay)
 3. **Select** — the item tree on the left, a **Source / Preview / Notes** detail
-   pane on the right. Item labels are `[x] ✔ label` (OK), `[ ] ⚠ label` (PARTIAL)
-   and `    ✖ label` (UNSUPPORTED). The Source and Preview tabs show redacted XML
-   (see the security model).
+   pane on the right. Each row starts with a selection bracket — `[x]` selected,
+   `[ ]` not — followed by the label and, for non-OK items only, a trailing
+   status marker: `[x] label` (OK), `[ ] label ⚠` (PARTIAL), `[ ] label ✖`
+   (UNSUPPORTED). The bracket is selection only (never status), and every row —
+   including untranslatable ones — is bracketed so the column aligns. Section
+   headers are `[x]`/`[-]`/`[ ] title (n/total)`, counting only selectable
+   items (UNSUPPORTED items are excluded from both numbers). Colours: OK green,
+   PARTIAL yellow, UNSUPPORTED red/dim, applied to the label and its marker.
+   The Source and Preview tabs show redacted XML (see the security model).
    * `space` toggle item / section (dependency rules apply — see below)
    * `a` select all OK/PARTIAL in the section, `n` select none in the section
    * `A` select all default items globally

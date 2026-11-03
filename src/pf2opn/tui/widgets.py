@@ -7,6 +7,7 @@ import dataclasses
 from collections.abc import Callable
 
 from lxml import etree
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.widgets import Static, TabbedContent, TabPane, TextArea, Tree
@@ -16,41 +17,68 @@ from ..model import Item, Plan, Status
 from ..registry import all_translators, get
 from ..secrets import redacted_xml
 
-#: The status glyph per §15 item label.
-STATUS_GLYPH: dict[Status, str] = {
-    Status.OK: "\u2714",  # ✔
-    Status.PARTIAL: "\u26a0",  # ⚠
-    Status.UNSUPPORTED: "\u2716",  # ✖
+#: The trailing status marker per §15 item label (OK is unmarked).
+STATUS_MARKER: dict[Status, str] = {
+    Status.OK: "",
+    Status.PARTIAL: " \u26a0",  # ⚠
+    Status.UNSUPPORTED: " \u2716",  # ✖
+}
+
+#: Style per §15 item status, applied to the label + marker (not the bracket).
+STATUS_STYLE: dict[Status, str] = {
+    Status.OK: "green",
+    Status.PARTIAL: "yellow",
+    Status.UNSUPPORTED: "red dim",
 }
 
 _NOT_TRANSLATABLE = "Not translatable"
 
 
+def is_selectable(item: Item) -> bool:
+    """True when this item's selection counts (UNSUPPORTED items never count)."""
+    return item.status != Status.UNSUPPORTED
+
+
 def is_toggleable(item: Item) -> bool:
     """True when space may change this item's selection on the select screen."""
-    return item.status != Status.UNSUPPORTED and not item.readonly_selection
+    return is_selectable(item) and not item.readonly_selection
 
 
 def item_label(item: Item, selected: bool) -> str:
-    """The §15 tree label: ``[x] ✔ label`` / ``[ ] ⚠ label`` / ``    ✖ label``."""
-    glyph = STATUS_GLYPH[item.status]
-    if item.status == Status.UNSUPPORTED:
-        return f"    {glyph} {item.label}"
-    return f"[{'x' if selected else ' '}] {glyph} {item.label}"
+    """The §15 item label: selection bracket, then label, then status marker.
+
+    The leading bracket is selection only (``[x]`` selected, ``[ ]`` not; never
+    ``[-]``). Status is a trailing glyph present only on non-OK items, so it
+    can't be read as the checkbox. Every row is bracketed, including
+    UNSUPPORTED ones, so the column aligns.
+    """
+    check = "[x]" if selected and is_selectable(item) else "[ ]"
+    return f"{check} {item.label}{STATUS_MARKER[item.status]}"
+
+
+def item_text(item: Item, selected: bool) -> Text:
+    """The tree renderable for *item*: the plain §15 label plus its status colour.
+
+    The selection bracket is left unstyled; the status colour marks the label
+    and its trailing marker only, so the glyph — not the colour — says selected.
+    """
+    label = item_label(item, selected)
+    text = Text(label[:3], style="")
+    text.append(label[3:], style=STATUS_STYLE[item.status])
+    return text
 
 
 def section_label(title: str, items: list[Item], selected: set[str]) -> str:
-    """The §15 section label: ``[x]/[-]/[ ] title (selected/total)``."""
-    selectable = [item for item in items if is_toggleable(item)]
-    chosen = sum(1 for item in selectable if item.id in selected)
-    if not selectable or chosen == 0:
-        prefix = "[ ]"
-    elif chosen == len(selectable):
-        prefix = "[x]"
-    else:
-        prefix = "[-]"
-    total_selected = sum(1 for item in items if item.id in selected)
-    return f"{prefix} {title} ({total_selected}/{len(items)})"
+    """The §15 section label: ``[x]/[-]/[ ] title (chosen/total)``.
+
+    Both the bracket and the counts are computed over the section's *selectable*
+    items, so the bracket is ``[x]`` exactly when ``chosen == total``.
+    """
+    selectable = [i for i in items if is_selectable(i)]
+    chosen = sum(1 for i in selectable if i.id in selected)
+    total = len(selectable)
+    prefix = "[ ]" if total == 0 or chosen == 0 else "[x]" if chosen == total else "[-]"
+    return f"{prefix} {title} ({chosen}/{total})"
 
 
 class ItemTree(Tree):
@@ -99,7 +127,7 @@ class ItemTree(Tree):
             )
             for item in shown:
                 node.add_leaf(
-                    item_label(item, item.id in plan.selected),
+                    item_text(item, item.id in plan.selected),
                     data={"kind": "item", "id": item.id},
                 )
             first = first or node
@@ -110,7 +138,7 @@ class ItemTree(Tree):
             )
             for item in tail:
                 node.add_leaf(
-                    item_label(item, item.id in plan.selected),
+                    item_text(item, item.id in plan.selected),
                     data={"kind": "item", "id": item.id},
                 )
             first = first or node
