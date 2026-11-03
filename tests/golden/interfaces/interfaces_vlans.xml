@@ -1,0 +1,37 @@
+<golden>
+  <placement path="interfaces/wan" mode="replace">
+    <wan>
+      <if>igc0</if>
+      <descr>WAN</descr>
+      <enable>1</enable>
+      <ipaddr>dhcp</ipaddr>
+    </wan>
+  </placement>
+  <placement path="interfaces/lan" mode="replace">
+    <lan>
+      <if>igc1</if>
+      <descr>LAN</descr>
+      <enable>1</enable>
+      <ipaddr>192.168.1.1</ipaddr>
+      <subnet>24</subnet>
+    </lan>
+  </placement>
+  <placement path="interfaces/opt1" mode="replace">
+    <opt1>
+      <if>vlan01</if>
+      <descr>Home___Lab</descr>
+      <enable>1</enable>
+      <ipaddr>10.0.10.1</ipaddr>
+      <subnet>24</subnet>
+    </opt1>
+  </placement>
+  <placement path="interfaces/opt2" mode="replace">
+    <opt2>
+      <if>vlan02</if>
+      <descr>Guests</descr>
+      <enable>1</enable>
+      <ipaddr>10.0.20.1</ipaddr>
+      <subnet>24</subnet>
+    </opt2>
+  </placement>
+</golden>

@@ -13,8 +13,9 @@ from lxml import etree
 
 from . import __version__
 from .context import SourceContext
+from .ifmap import default_ifmap, validate_ifmap
 from .model import Plan, Selection
-from .plan import build_default_ifmap, build_plan
+from .plan import build_plan
 from .registry import all_translators
 from .report import render_report
 from .selection import compute_selection, load_selection
@@ -83,7 +84,7 @@ def _load_source(source: str, base: str) -> SourceContext:
 
 def _load_plan(source: str, base: str) -> tuple[SourceContext, Plan]:
     src = _load_source(source, base)
-    ifmap = build_default_ifmap(src)
+    ifmap = default_ifmap(src)
     return src, build_plan(src, ifmap)
 
 
@@ -164,7 +165,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     nic_map = dict(sel.nic_map)
     nic_map.update(_parse_nic_pairs(args.map_nic))
 
-    ifmap = build_default_ifmap(src, nic_map)
+    ifmap = default_ifmap(src, nic_map)
     for key, spec in sel.interfaces.items():
         target = ifmap.targets.get(key)
         if target is not None:
@@ -176,6 +177,10 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         plan.selected = compute_selection(plan, sel)
     except ValueError as exc:
         raise UsageError(str(exc)) from exc
+
+    mapping_errors = validate_ifmap(ifmap)
+    if mapping_errors:
+        raise UsageError("; ".join(mapping_errors))
 
     if sel.source_sha256 and sel.source_sha256 != src.source_sha256:
         print(

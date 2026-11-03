@@ -7,12 +7,16 @@ mismatch (§10.3) is emitted here because it needs the output tree.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from lxml import etree
 
 from .model import Plan
 from .versions import MODEL_VERSIONS
+
+_VLAN_DEVICE = re.compile(r"^vlan0\d+$")
+_WG_DEVICE = re.compile(r"^wg(\d+)$")
 
 
 @dataclass
@@ -36,7 +40,84 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(_check_well_formed(out))
     findings.extend(_check_unique_uuids(out))
+    findings.extend(_check_interfaces(out))
+    findings.extend(_check_vlan_parents(out, plan))
     findings.extend(_check_versions(out))
+    return findings
+
+
+def _interface_elements(out: etree._Element) -> list[etree._Element]:
+    return [
+        iface
+        for iface in out.findall("interfaces/*")
+        if isinstance(iface.tag, str)
+    ]
+
+
+def _check_interfaces(out: etree._Element) -> list[Finding]:
+    """§13 check 3: interface devices present, unique, VLANs/WG defined."""
+    findings: list[Finding] = []
+    vlanifs = {(vlan.findtext("vlanif") or "").strip() for vlan in out.findall("vlans/vlan")}
+    instances = {
+        (server.findtext("instance") or "").strip()
+        for server in out.findall("OPNsense/wireguard/server/servers/server")
+    }
+    seen: set[str] = set()
+    for iface in _interface_elements(out):
+        value = (iface.findtext("if") or "").strip()
+        if not value:
+            findings.append(
+                Finding("error", f"interface {iface.tag} has no device", _path_of(iface))
+            )
+            continue
+        if value in seen:
+            findings.append(
+                Finding(
+                    "error",
+                    f"device {value} is used by more than one interface",
+                    _path_of(iface),
+                )
+            )
+            continue
+        seen.add(value)
+        wg = _WG_DEVICE.match(value)
+        if _VLAN_DEVICE.match(value) and value not in vlanifs:
+            findings.append(
+                Finding(
+                    "error",
+                    f"interface {iface.tag} uses {value}, which is not a defined VLAN",
+                    _path_of(iface),
+                )
+            )
+        elif wg and wg.group(1) not in instances:
+            findings.append(
+                Finding(
+                    "error",
+                    f"interface {iface.tag} uses {value}, which is not a WireGuard server",
+                    _path_of(iface),
+                )
+            )
+    return findings
+
+
+def _check_vlan_parents(out: etree._Element, plan: Plan) -> list[Finding]:
+    """§13 check 4: every VLAN parent is an assigned interface or a target NIC."""
+    findings: list[Finding] = []
+    assigned = {(iface.findtext("if") or "").strip() for iface in _interface_elements(out)}
+    target_nics = set(plan.ifmap.nic_map.values())
+    target_nics |= set(plan.ifmap.vlan_names.values())
+    target_nics |= set(plan.ifmap.wg_names.values())
+    target_nics.discard("")
+    for vlan in out.findall("vlans/vlan"):
+        parent = (vlan.findtext("if") or "").strip()
+        if parent and parent not in assigned and parent not in target_nics:
+            findings.append(
+                Finding(
+                    "error",
+                    f"VLAN {vlan.findtext('vlanif')} parent {parent} is not assigned",
+                    _path_of(vlan),
+                )
+            )
     return findings
 
 

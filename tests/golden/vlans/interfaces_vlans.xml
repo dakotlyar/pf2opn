@@ -1,0 +1,32 @@
+<golden>
+  <placement path="vlans" mode="append">
+    <vlan uuid="194b5e01-c4ee-52b8-836a-094d82377639">
+      <if>igc1</if>
+      <tag>10</tag>
+      <pcp>0</pcp>
+      <descr>Home &amp; Lab</descr>
+      <vlanif>vlan01</vlanif>
+      <proto/>
+    </vlan>
+  </placement>
+  <placement path="vlans" mode="append">
+    <vlan uuid="979fdcc1-e2a0-556a-a978-59afe6eff139">
+      <if>igc1</if>
+      <tag>20</tag>
+      <pcp>0</pcp>
+      <descr>Guests</descr>
+      <vlanif>vlan02</vlanif>
+      <proto/>
+    </vlan>
+  </placement>
+  <placement path="vlans" mode="append">
+    <vlan uuid="212c272d-07d9-54d0-a4ff-3fdb12ceabb3">
+      <if>igc1</if>
+      <tag>30</tag>
+      <pcp>0</pcp>
+      <descr>Unassigned</descr>
+      <vlanif>vlan03</vlanif>
+      <proto/>
+    </vlan>
+  </placement>
+</golden>

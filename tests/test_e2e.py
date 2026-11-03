@@ -10,7 +10,8 @@ from lxml import etree
 
 from pf2opn import cli
 from pf2opn.context import SourceContext
-from pf2opn.plan import build_default_ifmap, build_plan
+from pf2opn.ifmap import default_ifmap
+from pf2opn.plan import build_plan
 from pf2opn.validate import validate
 
 
@@ -54,7 +55,7 @@ def test_e2e_migrate_minimal(tmp_path: Path, minimal_path: Path, opnsense_base: 
 
     # validate() finds no errors on the written output
     src = SourceContext.load(minimal_path, opnsense_base)
-    plan = build_plan(src, build_default_ifmap(src))
+    plan = build_plan(src, default_ifmap(src))
     assert [f for f in validate(reparsed, plan) if f.level == "error"] == []
 
 

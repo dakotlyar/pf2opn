@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Callable
 
 import pytest
+from lxml import etree
 
 TESTS_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = TESTS_DIR / "fixtures"
@@ -38,15 +40,58 @@ def minimal_path(pfsense_dir: Path) -> Path:
     return pfsense_dir / "minimal.xml"
 
 
+def _fixture_plan(name: str, base: Path, nic_map: dict[str, str]):
+    from pf2opn.context import SourceContext
+    from pf2opn.ifmap import default_ifmap
+    from pf2opn.plan import build_plan
+
+    src = SourceContext.load(PFSENSE_DIR / name, base)
+    return src, build_plan(src, default_ifmap(src, nic_map))
+
+
 @pytest.fixture
 def minimal_plan(minimal_path: Path, opnsense_base: Path):
     """(SourceContext, Plan) for the minimal fixture with a fixed NIC map."""
-    from pf2opn.context import SourceContext
-    from pf2opn.plan import build_default_ifmap, build_plan
+    return _fixture_plan("minimal.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"})
 
-    src = SourceContext.load(minimal_path, opnsense_base)
-    ifmap = build_default_ifmap(src, {"em0": "igc0", "em1": "igc1"})
-    return src, build_plan(src, ifmap)
+
+@pytest.fixture
+def interfaces_vlans_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``interfaces_vlans.xml`` (fixed NIC map)."""
+    return _fixture_plan("interfaces_vlans.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"})
+
+
+@pytest.fixture
+def aliases_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``aliases.xml``."""
+    return _fixture_plan("aliases.xml", opnsense_base, {"em0": "igc0", "em1": "igc1"})
+
+
+@pytest.fixture
+def misc_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``misc.xml``."""
+    return _fixture_plan(
+        "misc.xml", opnsense_base, {"em0": "igc0", "em1": "igc1", "em2": "igc2"}
+    )
+
+
+@pytest.fixture
+def wrap_placements() -> Callable[[list], str]:
+    """Wrap rendered placements as a golden ``<golden>`` document (§16.2)."""
+
+    def wrap(placements) -> str:
+        root = etree.Element("golden")
+        for placement in placements:
+            node = etree.SubElement(root, "placement")
+            node.set("path", placement.path)
+            node.set("mode", placement.mode.value)
+            if placement.element is not None:
+                node.append(copy.deepcopy(placement.element))
+            elif placement.text is not None:
+                node.text = placement.text
+        return etree.tostring(root, pretty_print=True, encoding="unicode")
+
+    return wrap
 
 
 @pytest.fixture
