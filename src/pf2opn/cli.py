@@ -56,12 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--keep-base-rules", action="store_true", help="keep the base filter rules")
     migrate.add_argument("--force", action="store_true", help="overwrite an existing OUT")
 
-    tui = sub.add_parser("tui", help="interactive selection (not implemented until M11)")
+    tui = sub.add_parser("tui", help="interactive selection and migration")
     tui.add_argument("source", metavar="SOURCE", help="pfSense config.xml to read (read-only)")
     tui.add_argument("--base", required=True, metavar="BASE", help="base OPNsense config.xml")
     tui.add_argument("-o", "--output", required=True, metavar="OUT", help="output config.xml")
     tui.add_argument("--report", metavar="REPORT", help="report path (default: OUT.report.md)")
     tui.add_argument("--selection", metavar="FILE", help="selection JSON to load/save")
+    tui.add_argument("--force", action="store_true", help="overwrite an existing OUT")
 
     return parser
 
@@ -210,8 +211,19 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
-    print("pf2opn: the interactive TUI is not implemented yet (milestone M11)", file=sys.stderr)
-    return 2
+    src = _load_source(args.source, args.base)
+
+    out_path = Path(args.output)
+    for other in (args.source, args.base):
+        if _same_file(out_path, other):
+            raise UsageError(f"refusing to write the output onto {other}")
+
+    from .tui import run
+
+    try:
+        return run(src, args)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise UsageError(str(exc)) from exc
 
 
 _HANDLERS = {

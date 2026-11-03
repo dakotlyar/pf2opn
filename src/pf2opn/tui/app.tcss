@@ -1,0 +1,119 @@
+/* pf2opn TUI styles (design §15). */
+
+Screen {
+    background: $surface;
+}
+
+/* ---- Load / Done / Review ---- */
+
+#load-body,
+#done-body,
+#review-body {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#load-summary,
+#done-summary,
+#review-summary {
+    width: 1fr;
+}
+
+#review-errors {
+    color: $error;
+}
+
+#review-warnings {
+    color: $warning;
+}
+
+#review-paths {
+    color: $text-muted;
+}
+
+/* ---- Interface map ---- */
+
+#ifmap-hint {
+    padding: 1 2;
+}
+
+#ifmap-table {
+    height: 1fr;
+    margin: 0 1;
+}
+
+#ifmap-footer {
+    color: $error;
+    min-height: 1;
+    padding: 0 2;
+}
+
+/* ---- Select ---- */
+
+#select-body {
+    height: 1fr;
+}
+
+#items {
+    width: 3fr;
+    border: round $primary;
+}
+
+#detail {
+    width: 2fr;
+    border: round $primary;
+}
+
+#detail TextArea {
+    height: 1fr;
+}
+
+#detail #notes {
+    padding: 1;
+}
+
+#select-search {
+    height: 3;
+    margin: 0 1;
+}
+
+/* ---- Modals ---- */
+
+NicPickerModal,
+ConfirmDeselectModal,
+ConfirmQuitModal,
+ConfirmOverwriteModal,
+SaveSelectionModal,
+HelpModal {
+    align: center middle;
+}
+
+#nic-picker,
+#confirm-deselect,
+#confirm-quit,
+#confirm-overwrite,
+#save-selection,
+#help-modal {
+    width: 60;
+    height: auto;
+    border: round $primary;
+    background: $panel;
+    padding: 1 2;
+}
+
+#nic-picker Horizontal,
+#confirm-deselect Horizontal,
+#confirm-quit Horizontal,
+#confirm-overwrite Horizontal,
+#save-selection Horizontal {
+    height: auto;
+    align-horizontal: right;
+}
+
+#confirm-deselect-list {
+    color: $warning;
+}
+
+#help-modal {
+    width: 70;
+}
