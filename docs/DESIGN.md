@@ -1282,15 +1282,15 @@ prior pf2opn output of the same tunnel); an unrelated base tunnel survives. Rend
 | `port` | `listenport` |
 | `mtu` | `mtu` |
 | `dns` | empty |
-| `tunneladdress` | comma-join of `addresses/row` `address/mask`. **If empty**, use the pfSense interface assigned to this tunnel (`interfaces/*/if == name`): `ipaddr/subnet` |
-| `disableroutes` | `1` if any peer of this tunnel has `0.0.0.0/0` or `::/0` in allowed IPs, else `0` |
+| `tunneladdress` | comma-join of `addresses/row` `address/mask`; a row with an empty `mask` means the host mask — `/32` (IPv4) or `/128` (IPv6). **If empty**, use the pfSense interface assigned to this tunnel (`interfaces/*/if == name`): `ipaddr/subnet` |
+| `disableroutes` | `1` if any peer of this tunnel has `0.0.0.0/0` or `::/0` among its **row-parsed** allowed-IP CIDRs (a `allowedips/row` with `address=0.0.0.0`/`mask=0` → `0.0.0.0/0`; see the peer note below), else `0` |
 | `gateway` | when `disableroutes=1`: the `gateway` IP of the first pf gateway_item whose interface is this tunnel's assigned key; else empty |
 | `peers` | comma-join of `ctx.uuid("wgpeer:<i>")` for selected peers with `tun == name` |
 | `carp_depend_on`,`debug`,`endpoint`,`peer_dns` | empty / `0` |
 
 Warnings: when `disableroutes=1` → "routes for peer allowed IPs disabled (a peer has a
-default route); add static routes for remote subnets: <list of non-tunnel allowed-IP
-networks>". If the tunnel isn't assigned to an interface → note "unassigned tunnel".
+default route); add static routes for remote subnets: <list of the row-parsed, non-tunnel allowed-IP
+CIDRs>". If the tunnel isn't assigned to an interface → note "unassigned tunnel".
 `finalize`: SET `OPNsense/wireguard/general/enabled` = `1`.
 
 **Peers** (`wgpeer:<i>`, translator `wg_peer`, base_policy `merge`, **identity = the peer's
@@ -1312,6 +1312,22 @@ another copy. Render → APPEND `opn:OPNsense/wireguard/client/clients/client`
 (pfSense peers do not store the remote private key), `servers` = comma list containing the server
 uuid when the peer's tunnel is migrated.
 
+**`allowedips` is a `row` list, not text** — the same shape as a tunnel's `addresses`:
+
+```xml
+<allowedips>
+  <row><address>10.0.5.15</address><mask>32</mask><descr/></row>
+</allowedips>
+```
+
+Parse every `allowedips/row` into the CIDR string `address/mask` — exactly as a tunnel's
+`addresses/row` are parsed (the `tunneladdress` row of the tunnel table above) and as an Unbound
+ACL's `row/acl_network`+`row/mask` are (§12.1.13). **A row whose `mask` is empty takes the host
+mask for its address family: `/32` for an IPv4 `address`, `/128` for an IPv6 one.** Do **not** read
+`allowedips` as whitespace/newline-separated text: a real `<allowedips>` element carries no text of
+its own, so splitting its text yields an empty list and *every* peer is wrongly reported "no allowed
+IPs" — the exact failure a text-shaped synthetic fixture hid (§16.1).
+
 `tunneladdress` — **the one genuinely lossy mapping in this translator, so decide it explicitly:**
 
 pfSense peer `allowedips` are the *server's view of the addresses behind the peer*, which is **not**
@@ -1319,8 +1335,8 @@ the same thing as OPNsense's client `tunneladdress` (the address that peer holds
 The real config shows all three shapes, so the rule is:
 
 1. `server_net` = the network of the peer's tunnel's `tunneladdress` (e.g. `10.0.5.1/24` → `10.0.5.0/24`).
-2. `tunnel_ips` = allowedips entries that are host addresses (`/32` or `/128`) **and** fall inside `server_net`.
-3. `remote_nets` = all other allowedips entries.
+2. `tunnel_ips` = the row-parsed allowed-IP CIDRs that are host addresses (`/32` or `/128`) **and** fall inside `server_net`.
+3. `remote_nets` = all other row-parsed allowed-IP CIDRs.
 
 * If `tunnel_ips` is non-empty → `tunneladdress` = those (comma-joined), status OK.
 * If `tunnel_ips` is empty but `remote_nets` is non-empty → `tunneladdress` = the first `remote_nets`
@@ -1331,7 +1347,9 @@ The real config shows all three shapes, so the rule is:
 
 Whenever `remote_nets` is non-empty, add a warning "peer routes <remote_nets>; add these as static routes or
 in the peer's Allowed IPs" and a followup. `0.0.0.0/0`/`::/0` in `remote_nets` is not itself an error (it is
-the "route everything" peer) but must be listed.
+the "route everything" peer) but must be listed. Both come from a row `address=0.0.0.0`+`mask=0`
+(`::`+`mask=0`), which the row parser renders **with** its mask — never as a bare `0.0.0.0` — so the
+`0.0.0.0/0` detection in `disableroutes` and here compares against the parsed CIDR, not raw text.
 
 `serveraddress`/`serverport` are always left empty: pfSense peers carry **no `endpoint`/`port`**
 (`installedpackages/wireguard/peers/item` has only `allowedips`, `enabled`, `tun`, `descr`,
@@ -1621,7 +1639,12 @@ They're written by hand and modelled on the real structure documented in this sp
   with `openssl` at fixture creation and commit them; never reuse anything from a real box).
 * `wireguard.xml`: 2 tunnels (**`name` values `tun_wg0`/`tun_wg1` with real `descr`, and one with
   no `addresses`**), 4 peers (one unassigned, one with `0.0.0.0/0` plus a host address, one with a
-  remote subnet, one with no host address). Keys are random 32-byte base64.
+  remote subnet, one with no host address). **Both the tunnel `addresses` and the peer `allowedips`
+  MUST be written in the real `row` shape** — `<row><address>…</address><mask>…</mask><descr/></row>`,
+  never a text/newline string — because that is exactly what hid the bug: an earlier fixture encoded
+  `allowedips` as text, so the translator's whitespace-split passed every test while every real peer
+  parsed as "no allowed IPs" (§12.1.17). Include at least one peer row with an **empty `mask`** to pin
+  the `/32` (IPv4) / `/128` (IPv6) fallback. Keys are random 32-byte base64.
 * `edge_cases.xml`: a `snmpd` with **no `<enable>`**, an `ipsec` with only `mobilekey`/`client`,
   a `dyndnses` entry with `host=dynamic`, an `ovpnserver` block, and a `cron` item whose command is a
   custom script (the "wrap it in a configd action" path).
@@ -1936,3 +1959,20 @@ is now stated in the referenced section. Re-verified against `26.7.8` for this p
 * `pfsense/pfsense` `syslog.inc::system_syslogd_fixup_server()` — confirms pfSense stores an
   unbracketed IPv6 literal for a remote server (it brackets it only when writing `syslog.conf`),
   which is why the split must not treat the colons as a host/port separator (§12.1.19).
+
+### 2026-11-03 — spec amendment after the real-config run (WireGuard `allowedips` rows)
+
+A real-config run against `config-gateway.home.asmartass.me-20261101163750.xml` exposed a parse bug the
+synthetic fixtures had masked: every WireGuard peer came back UNSUPPORTED "peer has no allowed IPs"
+(0 of 10 migrated). Root cause was an ambiguity in §12.1.17, now fixed there:
+
+* **`installedpackages/wireguard/peers/item/allowedips` is a `row` list**, not a text/newline field —
+  `allowedips/row` with `address` + `mask`, the same shape as a tunnel's `addresses/row` and an Unbound
+  ACL's `row/acl_network`+`mask`. The spec and the fixture (§16.1) both described it as text, and the
+  translator split it on whitespace, so a real (empty-text) `<allowedips>` yielded an empty list. Now
+  parsed row-wise, with an empty `mask` meaning `/32` (IPv4) / `/128` (IPv6). `0.0.0.0/0`/`::/0` are a
+  row `address=0.0.0.0`+`mask=0` (`::`+`mask=0`), and `disableroutes` / the `tunnel_ips`/`remote_nets`
+  heuristic compare the parsed CIDRs. The `wireguard.xml` fixture description now requires the `row`
+  shape. No other field in this spec describes a `row`-stored value as text: the Unbound `acls` rows
+  (§12.1.13) and the tunnel `addresses/row` were already correct, and the remaining multi-value fields
+  (alias `address`, NTP `timeservers`, Unbound `ip`, filter `interface`) really are text in pfSense.
