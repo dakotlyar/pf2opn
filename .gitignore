@@ -8,3 +8,7 @@ config-*.xml
 *.real.xml
 *.report.md
 !tests/**
+# Re-ignore caches under tests/ (the !tests/** line above would otherwise un-ignore them).
+__pycache__/
+*.pyc
+.pytest_cache/
