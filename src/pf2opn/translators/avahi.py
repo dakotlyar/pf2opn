@@ -13,13 +13,17 @@ from lxml import etree
 from ..context import SourceContext, WriteContext
 from ..model import IfaceMap, Item, Mode, Placement, Status
 from ..registry import register
-from .base import Translator, opn_bool, pf_text
+from .base import Translator, opn_bool, pf_flag, pf_text
 
-#: Fields with no OPNsense equivalent: a truthy (by text) value earns a PARTIAL
-#: warning; an empty element — as in the reference config — is off and silent.
-_NO_EQUIVALENT = (
+#: Fields with no OPNsense equivalent, split by the §12.1.20 warning rule.
+#: * truthy by text (``on``/``yes``/``1``/``true``): an empty element — as in
+#:   the reference config — is off and silent;
+#: * non-empty: any present, non-whitespace text warns, even falsey text (``0``).
+_NO_EQUIVALENT_TRUTHY = (
     ("disable_ipv4", "pfSense disabled IPv4 reflection; os-mdns-repeater reflects IPv4"),
     ("disable_ipv6", "pfSense disabled IPv6 reflection; os-mdns-repeater reflects IPv4"),
+)
+_NO_EQUIVALENT_NONEMPTY = (
     ("override_hostname", "hostname override has no OPNsense equivalent"),
     ("override_domain", "domain override has no OPNsense equivalent"),
     ("publishing", "publishing settings have no OPNsense equivalent"),
@@ -65,7 +69,7 @@ class AvahiTranslator(Translator):
         if not _nonempty(config):
             return []
 
-        enabled = _truthy(pf_text(config, "enable"))
+        enabled = pf_flag(config, "enable")
         tokens = _split_keys(pf_text(config, "interfaces"))
         included = ifmap.included_keys()
         kept = [key for key in tokens if key in included]
@@ -77,8 +81,11 @@ class AvahiTranslator(Translator):
 
         warnings: list[str] = []
         if enabled:
-            for field, message in _NO_EQUIVALENT:
+            for field, message in _NO_EQUIVALENT_TRUTHY:
                 if _truthy(pf_text(config, field)):
+                    warnings.append(message)
+            for field, message in _NO_EQUIVALENT_NONEMPTY:
+                if pf_text(config, field):
                     warnings.append(message)
             if not _truthy(pf_text(config, "reflection")):
                 warnings.append(

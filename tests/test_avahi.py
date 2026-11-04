@@ -103,6 +103,21 @@ def test_disabled_config_is_discovered_but_not_default_selected() -> None:
     assert enabled.text == "0"
 
 
+def test_empty_present_enable_is_on() -> None:
+    """A present-but-empty ``<enable/>`` is on: §7.3 ``pf_flag`` semantics."""
+    item = _item(
+        _config("<enable/><interfaces>opt1,opt2</interfaces><reflection>yes</reflection>"),
+        "opt1",
+        "opt2",
+    )
+    assert item.status == Status.OK
+    assert item.default_selected is True
+    assert item.data["enabled"] is True
+    placements = registry.get("avahi").render(item, None)
+    enabled = next(p for p in placements if p.path.endswith("/enabled"))
+    assert enabled.text == "1"
+
+
 def test_disabled_config_has_no_warnings_even_with_truthy_no_equivalents() -> None:
     item = _item(
         _config(
@@ -233,6 +248,24 @@ def test_empty_no_equivalent_elements_are_silent() -> None:
     )
     assert item.status == Status.OK
     assert item.warnings == []
+
+
+def test_falsey_nonempty_no_equivalents_warn() -> None:
+    """Non-empty no-equivalent fields warn even when the text is falsey."""
+    item = _item(
+        _config(
+            "<enable>yes</enable><interfaces>opt1,opt2</interfaces><reflection>yes</reflection>"
+            "<override_hostname>0</override_hostname><publishing>0</publishing>"
+            "<disable_ipv4>0</disable_ipv4>"
+        ),
+        "opt1",
+        "opt2",
+    )
+    assert item.status == Status.PARTIAL
+    assert any("hostname override" in warning for warning in item.warnings)
+    assert any("publishing settings" in warning for warning in item.warnings)
+    # disable_ipv4 keeps the truthy-by-text rule: ``0`` is off and silent.
+    assert not any("disable" in warning.lower() for warning in item.warnings)
 
 
 # --------------------------------------------------------------------------- #
