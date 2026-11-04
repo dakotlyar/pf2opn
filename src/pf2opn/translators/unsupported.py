@@ -118,8 +118,6 @@ _CATALOGUE: tuple[tuple[str, str, Callable[[etree._Element], bool], str], ...] =
      "install os-frr 2.x and rebuild BGP config"),
     ("tailscale", "Tailscale", lambda pf: _packages(pf, "tailscale"),
      "install os-tailscale and re-authenticate"),
-    ("avahi", "Avahi/mDNS", lambda pf: _packages(pf, "avahi"),
-     "install os-mdns-repeater; migrated as M15 (\u00a717)"),
     ("shellcmd", "Shell commands", _shellcmd, "use /usr/local/etc/rc.syshook.d/ scripts"),
     ("servicewatchdog", "Service Watchdog", lambda pf: _packages(pf, "servicewatchdog"),
      "use Monit"),

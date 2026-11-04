@@ -542,3 +542,67 @@ def test_supplied_base_is_not_warned(minimal_plan) -> None:
     out = build_output(plan, src)
     warnings = [f for f in validate(out, plan) if f.level == "warning"]
     assert not any("built-in factory base" in f.message for f in warnings)
+
+
+def _mdns_out(repeater: str, interfaces: str = "") -> etree._Element:
+    return _el(f"<opnsense>{interfaces}<OPNsense><MDNSRepeater>{repeater}"
+               "</MDNSRepeater></OPNsense></opnsense>")
+
+
+_IFACES = "<interfaces><lan><if>igc1</if></lan><opt1><if>igc2</if></opt1></interfaces>"
+
+
+def test_mdns_unknown_interface_is_an_error(minimal_plan) -> None:
+    """§13 check 14: the InterfaceField has no "any" keyword."""
+    _src, plan = minimal_plan
+    out = _mdns_out(
+        "<enabled>1</enabled><interfaces>lan,opt9</interfaces>", _IFACES
+    )
+    findings = _errors(validate(out, plan))
+    assert any("opt9" in finding.message for finding in findings)
+
+
+def test_mdns_enabled_without_interfaces_is_an_error(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _mdns_out("<enabled>1</enabled><interfaces></interfaces>", _IFACES)
+    findings = _errors(validate(out, plan))
+    assert any("no listen interfaces" in finding.message for finding in findings)
+
+
+def test_mdns_single_interface_is_a_warning(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _mdns_out("<enabled>1</enabled><interfaces>lan</interfaces>", _IFACES)
+    findings = validate(out, plan)
+    assert _errors(findings) == []
+    assert any(
+        f.level == "warning" and "2 to 5" in f.message for f in findings
+    )
+
+
+def test_mdns_too_many_interfaces_is_a_warning(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    ifaces = "".join(
+        f"<opt{n}><if>igc{n}</if></opt{n}>" for n in range(1, 7)
+    )
+    keys = ",".join(f"opt{n}" for n in range(1, 7))
+    out = _mdns_out(
+        f"<enabled>1</enabled><interfaces>{keys}</interfaces>",
+        f"<interfaces>{ifaces}</interfaces>",
+    )
+    findings = validate(out, plan)
+    assert _errors(findings) == []
+    assert any(f.level == "warning" and "2 to 5" in f.message for f in findings)
+
+
+def test_mdns_valid_block_has_no_findings(minimal_plan) -> None:
+    _src, plan = minimal_plan
+    out = _mdns_out("<enabled>1</enabled><interfaces>lan,opt1</interfaces>", _IFACES)
+    assert validate(out, plan) == []
+
+
+def test_mdns_disabled_unknown_interface_still_errors(minimal_plan) -> None:
+    """The interface vocabulary is checked regardless of ``enabled``."""
+    _src, plan = minimal_plan
+    out = _mdns_out("<enabled>0</enabled><interfaces>opt9</interfaces>", _IFACES)
+    findings = _errors(validate(out, plan))
+    assert any("opt9" in finding.message for finding in findings)

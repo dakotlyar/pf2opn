@@ -16,6 +16,7 @@ MODEL_VERSIONS: dict[str, str] = {
     "OPNsense/wireguard/server": "1.0.1",
     "OPNsense/wireguard/client": "1.0.0",
     "OPNsense/wireguard/general": "0.0.1",
+    "OPNsense/MDNSRepeater": "1.0.1",
     "OPNsense/Syslog": "1.0.2",
     "OPNsense/DynDNS": "1.5.1",
     "vlans": "1.0.0",

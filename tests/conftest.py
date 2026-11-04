@@ -138,6 +138,16 @@ def edge_cases_plan(opnsense_base: Path):
 
 
 @pytest.fixture
+def avahi_plan(opnsense_base: Path):
+    """(SourceContext, Plan) for ``avahi.xml`` (fixed NIC map)."""
+    return _fixture_plan(
+        "avahi.xml",
+        opnsense_base,
+        {"em0": "igc0", "em1": "igc1", "em2": "igc2", "em3": "igc3"},
+    )
+
+
+@pytest.fixture
 def section_placements() -> Callable:
     """Render the default-selected, migratable items of one section (§16.2)."""
     from pf2opn.context import WriteContext

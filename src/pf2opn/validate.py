@@ -55,6 +55,7 @@ def validate(out: etree._Element, plan: Plan) -> list[Finding]:
     findings.extend(_check_filter_refs(out))
     findings.extend(_check_nat_refs(out))
     findings.extend(_check_nat_families(out))
+    findings.extend(_check_mdns_repeater(out))
     findings.extend(_check_dnsmasq(out))
     findings.extend(_check_wireguard(out))
     findings.extend(_check_unbound(out))
@@ -593,6 +594,52 @@ def _check_nat_families(out: etree._Element) -> list[Finding]:
                             _path_of(rule),
                         )
                     )
+    return findings
+
+
+def _check_mdns_repeater(out: etree._Element) -> list[Finding]:
+    """§13 check 14: every mDNS reflector listen interface must be an output key.
+
+    The plugin's ``interfaces`` field is an ``InterfaceField`` with no "any"
+    keyword, so an unknown token is a **model error**. When ``enabled=1`` the
+    field is ``Required`` (non-empty). The plugin asks for at least 2 and at most
+    5 listen interfaces but the model enforces neither, so a violation is a
+    **warning**.
+    """
+    findings: list[Finding] = []
+    block = out.find("OPNsense/MDNSRepeater")
+    if block is None:
+        return findings
+    iface_keys = _output_iface_keys(out)
+    raw = (block.findtext("interfaces") or "").strip()
+    tokens = [part.strip() for part in raw.split(",") if part.strip()]
+    for token in tokens:
+        if token not in iface_keys and token not in _VPN_IFACE_TOKENS:
+            findings.append(
+                Finding(
+                    "error",
+                    f"mDNS reflector uses unknown interface {token}",
+                    "OPNsense/MDNSRepeater/interfaces",
+                )
+            )
+    if (block.findtext("enabled") or "").strip() == "1":
+        if not tokens:
+            findings.append(
+                Finding(
+                    "error",
+                    "mDNS reflector is enabled but has no listen interfaces",
+                    "OPNsense/MDNSRepeater/interfaces",
+                )
+            )
+        elif len(tokens) < 2 or len(tokens) > 5:
+            findings.append(
+                Finding(
+                    "warning",
+                    f"mDNS reflector lists {len(tokens)} listen interface(s); "
+                    "os-mdns-repeater needs 2 to 5",
+                    "OPNsense/MDNSRepeater/interfaces",
+                )
+            )
     return findings
 
 

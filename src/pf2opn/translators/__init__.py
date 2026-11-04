@@ -5,6 +5,7 @@ Each milestone adds its modules here; the import is the registration side effect
 
 from . import (  # noqa: F401
     aliases,
+    avahi,
     cron,
     dhcp_dnsmasq,
     dyndns,

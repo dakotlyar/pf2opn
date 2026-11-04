@@ -1,0 +1,5 @@
+<golden>
+  <placement path="OPNsense/MDNSRepeater/enabled" mode="set">1</placement>
+  <placement path="OPNsense/MDNSRepeater/enablecarp" mode="set">0</placement>
+  <placement path="OPNsense/MDNSRepeater/interfaces" mode="set">opt1,opt2,opt3,opt5</placement>
+</golden>
