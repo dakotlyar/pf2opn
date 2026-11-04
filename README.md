@@ -1,51 +1,50 @@
 # pf2opn
 
-Neither pfSense nor OPNsense will import the other's `config.xml`, which makes moving
-from one to the other a tedious hand-transcription job. This is the tool I wrote to do
-that translation instead.
+pf2opn translates a pfSense `config.xml` into an OPNsense one. It reads the pfSense
+configuration, presents every migratable item with a status, lets you select what should
+carry over, and merges the selection into a base OPNsense config — writing a new
+`config.xml` plus a Markdown report of what it did.
 
-Point it at a pfSense `config.xml` and it walks everything in there, shows you how each
-piece maps (or explains why it can't), lets you pick what actually carries over, and
-writes a new OPNsense `config.xml` plus a report of what it did. It targets OPNsense
-26.7.x and the pfSense CE 2.7/2.8 config format.
+The need for it is simple: neither pfSense nor OPNsense imports the other's full
+configuration, so the move is normally done by hand. pf2opn targets OPNsense 26.7.x and
+the pfSense CE 2.7/2.8 config format.
 
-It only ever reads the pfSense file — that's opened read-only and never touched — and it
-doesn't talk to a live firewall at all: no API, no SSH. All you get back is a config file
-to look over and import yourself.
+The pfSense file is opened read-only and is never modified. The tool does not connect to a
+live firewall — there is no API or SSH access — so it only ever produces a config file to
+review and import.
 
-The full design, including why each section is mapped the way it is and what's
-deliberately left out, is in [`docs/DESIGN.md`](docs/DESIGN.md).
+The full design, including how each section is mapped and what is deliberately left out,
+is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Installing
 
-A virtualenv is the usual way:
+A virtualenv is the usual approach:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 ```
 
-Or build it into a single binary and skip Python entirely:
+Or build a standalone binary, which does not need Python at runtime:
 
 ```sh
 .venv/bin/pip install -e '.[build]'
 bash scripts/build-binary.sh        # or: .venv/bin/pyinstaller pf2opn.spec
 ```
 
-That leaves a ~23 MB file at `dist/pf2opn` you can copy anywhere — it doesn't care about
-the current directory or the checkout. It's a Linux build; there's no macOS or Windows
-one.
+This produces a single ~23 MB file at `dist/pf2opn` that can be copied anywhere; it does
+not depend on the current directory or the checkout. It is a Linux build; there is no
+macOS or Windows target.
 
 ## Running it
 
-With no arguments at all it opens the TUI:
+With no arguments, the interactive TUI opens:
 
 ```sh
 pf2opn                 # or ./dist/pf2opn if you built the binary
 ```
 
-If you'd rather pass things in up front, or use it non-interactively, there are three
-subcommands:
+There are also three subcommands, for passing options up front or for non-interactive use:
 
 ```
 pf2opn inspect SOURCE [--base BASE] [--json]
@@ -56,35 +55,34 @@ pf2opn tui     [SOURCE] [--base BASE] [-o OUT] [--report REPORT]
                [--search-path DIR ...] [--selection FILE] [--force]
 ```
 
-A quick word on the flags, since there are a few:
+The flags:
 
 - `SOURCE` — the pfSense config to read, opened read-only.
-- `--base` — the OPNsense config to merge into. Omit it and the built-in one is used.
-- `-o` / `--output` — where the new config goes (written `0600`).
-- `--report` — where the report goes; defaults to the output path with `.report.md` in
-  place of `.xml`.
+- `--base` — the OPNsense config to merge into. Omit it and the built-in base is used.
+- `-o` / `--output` — where the new config is written (mode `0600`).
+- `--report` — where the report is written; defaults to the output path with `.report.md`
+  in place of `.xml`.
 - `--map-nic PF=OPN` — map a pfSense NIC to an OPNsense one; repeatable.
 - `--keep-base-rules` — keep the base's two default LAN allow rules instead of replacing
-  them when you're carrying firewall rules over.
+  them when firewall rules are carried over.
 - `--search-path DIR` — add a directory to the TUI's config search; repeatable.
 - `--force` — overwrite an existing output.
 
-`inspect` just lists what it found — one line per item, grouped by section, with a status
-and a warning count. `--json` gives the same thing as a list of
-`{id, section, label, status, reason, warnings, deps}`. Neither form prints any of the
-source XML.
+`inspect` lists what was found, one line per item, grouped by section, with a status and a
+warning count. `--json` gives the same data as a list of
+`{id, section, label, status, reason, warnings, deps}`. Neither form prints any source XML.
 
-`migrate` is the headless path and needs one of `--select-all-ok` (take everything that's
-selected by default) or `--selection FILE` (a selection you saved from the TUI). The
-output is written `0600`, and it refuses to overwrite an existing file unless you pass
-`--force`, or to write onto your source or base config by accident.
+`migrate` is the non-interactive path and requires exactly one selection source:
+`--select-all-ok` (everything selected by default) or `--selection FILE` (a selection saved
+from the TUI). The output is written `0600`. It refuses to overwrite an existing file
+unless `--force` is given, and refuses to write onto the source or base config.
 
-`tui` is the interactive one, described below. Everything after `SOURCE` is optional
-there: run `pf2opn tui` on its own and the first screen asks for the rest.
+`tui` is the interactive interface, described below. Everything after `SOURCE` is optional
+there: running `pf2opn tui` on its own lets the first screen collect the rest.
 
-Exit codes are simple: `0` wrote something, `1` found validation errors and wrote
-nothing, `2` is a usage or input problem (missing/unmapped NIC, a bad selection id, XML
-that won't parse, refusing to overwrite, that sort of thing).
+Exit codes: `0` wrote output, `1` found validation errors and wrote nothing, `2` is a usage
+or input error (a missing or unmapped NIC, a bad selection id, XML that does not parse,
+refusing to overwrite, and so on).
 
 ### The TUI
 
@@ -92,56 +90,55 @@ that won't parse, refusing to overwrite, that sort of thing).
 pf2opn tui            # or just `pf2opn`
 ```
 
-The screens go left to right, `Esc` or `b` steps back, and `Ctrl+Q` quits from anywhere.
-(`q` also quits from most screens, but on the Load screen it just types a `q` into the
-search box — use `Ctrl+Q` there.)
+The screens run left to right; `Esc` or `b` steps back, and `Ctrl+Q` quits from anywhere.
+(`q` quits from most screens, but on the Load screen it is treated as input to the search
+box — use `Ctrl+Q` there.)
 
-**Load.** A search box for the pfSense config and one for the OPNsense base, plus a
-plain path for the output. The search boxes look in the current directory, `~/Downloads`,
-`~/Desktop`, `~`, and the folder of anything you've already told it about (add more with
-`--search-path`); they scan once and filter as you type. Type part of a name, arrow up
-and down the list, `Enter` to pick, `Esc` to clear, `r` to rescan. A full path you paste
-in works too — it doesn't have to come from the list. Leaving the base blank is fine.
+**Load.** A search box for the pfSense config and one for the OPNsense base, plus a plain
+path field for the output. The search boxes look in the current directory, `~/Downloads`,
+`~/Desktop`, `~`, and the directory of any path already supplied; add more with
+`--search-path`. They scan once and filter as you type: type part of a name, use the arrow
+keys, `Enter` to pick, `Esc` to clear, `r` to rescan. A full path can also be typed or
+pasted directly. Leaving the base blank is valid.
 
-Each field is checked inline, and once the source and output are valid (and the base is
-either blank or valid) `Enter` moves on. You get a short summary of what it's about to
-work on before the next screen.
+Each field is validated inline, and once the source and output are valid — and the base is
+either blank or valid — `Enter` continues. A short summary of the source and base is shown
+before the next screen.
 
-**Interface map.** A table of the interfaces it found with the device each one uses.
-VLAN and WireGuard rows show the device they'll get and can't be edited; the physical
-ones you assign yourself — `space` to include or not, `Enter` to pick a NIC, `c` to carry
-on once everything that's included has a device.
+**Interface map.** A table of the interfaces found and the device each uses. VLAN and
+WireGuard rows show the device they will get and cannot be edited; the physical rows are
+assigned here. `space` toggles inclusion, `Enter` picks a NIC, and `c` continues once every
+included interface has a device.
 
-**Select.** The main event: a tree of everything it found on the left, and a detail pane
-on the right showing the source XML, a preview of what it'll become, and any notes.
-Each row is prefixed with a checkbox — `[x]` for selected, `[ ]` for not — and anything
-worth flagging gets a marker at the end: nothing for a clean item, `⚠` for partial, `✖`
-for untranslatable. Section headers use the same idea with a third state, so `[x]` is all
-of it, `[-]` is some of it, `[ ]` is none.
+**Select.** A tree of everything found on the left and a detail pane on the right, showing
+the source XML, a preview of the translated output, and any notes. Each row is prefixed
+with a checkbox: `[x]` selected, `[ ]` not selected. Items that need attention carry a
+trailing marker — none for a clean item, `⚠` for partial, `✖` for untranslatable. Section
+headers use the same scheme with a third state: `[x]` for all, `[-]` for some, `[ ]` for
+none.
 
-Selection is clever about dependencies: pick a firewall rule and it quietly pulls in the
-aliases and interfaces that rule needs. Deselect something other selections rely on and
-it asks first.
+Selection handles dependencies: selecting a firewall rule also selects the aliases and
+interfaces it needs. Deselecting something that selected items depend on prompts for
+confirmation first.
 
-The keys that matter:
+Keys:
 
 - `space` toggles the highlighted item or section
-- `a` / `n` select all / none in the current section, `A` selects all defaults everywhere
-- `f` cycles the view: everything → selected only → problems only
-- `/` searches labels, `e` / `E` expand or collapse everything
-- `i` goes back to the interface map, `r` moves on to review
+- `a` / `n` select all / none in the current section; `A` selects all defaults
+- `f` cycles the view: everything → selected → problems
+- `/` searches labels; `e` / `E` expand or collapse all
+- `i` returns to the interface map; `r` continues to review
 
-**Review.** It builds the output and runs validation in the background, then shows you
-the summary, any errors, and any warnings. `w` writes the files (it's disabled while
-there are errors), `s` saves the selection so you can replay it later with
-`migrate --selection`, `b` goes back.
+**Review.** The output is built and validated in the background, then the summary, errors
+and warnings are shown. `w` writes the files (disabled while there are errors), `s` saves
+the selection for a later `migrate --selection`, and `b` goes back.
 
-**Done.** The paths it wrote, the counts, and which plugins the target will need.
+**Done.** The paths written, the counts, and any plugins the target will need.
 
 ### Saving a selection
 
-If you want a repeatable run — say, to re-do the migration after changing something — the
-TUI can save the selection as JSON:
+To make a run repeatable — for example, to redo a migration after a change — the TUI can
+save the selection as JSON:
 
 ```json
 {
@@ -155,61 +152,59 @@ TUI can save the selection as JSON:
 }
 ```
 
-Feed it back with `migrate --selection`. If the source file has changed since you saved
-it, pf2opn warns but carries on; an id it doesn't recognise is an error.
+Replay it with `migrate --selection`. If the source file has changed since it was saved,
+pf2opn warns but proceeds; an unrecognised id is an error.
 
 ## About the base config
 
-The output isn't built from nothing. It's a copy of a base OPNsense `config.xml` with
-your chosen pfSense items merged into it, because that's the only way to keep things like
-the real NIC names, the root password, and the model `version` attributes, which OPNsense
-needs to not re-run its own migrations on import.
+The output is not built from nothing. It is a copy of a base OPNsense `config.xml` with the
+selected pfSense items merged in, which is the only way to preserve details such as the
+real NIC names, the root password, and the model `version` attributes. OPNsense uses those
+version attributes to decide whether to re-run its own migrations on import.
 
-The best base is a fresh export from the target box — install OPNsense, assign WAN/LAN at
-the console, then grab the config from **System ▸ Configuration ▸ Backups**. That way the
-NIC names and everything else line up with the hardware you're actually moving to.
+The best base is a fresh export from the target appliance: install OPNsense, assign WAN and
+LAN at the console, then download the config from **System ▸ Configuration ▸ Backups**.
+That way the NIC names and other details match the hardware being moved to.
 
-You don't *have* to supply one, though. If you leave it out, pf2opn uses a built-in
-factory base (the stock OPNsense 26.7 config, wizard prompt stripped, with `igc0`/`igc1`
-as placeholder NICs). It works, and the report will tell you loud and clear that you used
-it — including that those `igc0`/`igc1` names are placeholders you need to confirm, and
-that the root password is still OPNsense's default `opnsense`.
+Supplying a base is not required, however. If none is given, pf2opn uses a built-in factory
+base — the stock OPNsense 26.7 configuration with the wizard prompt removed and `igc0` /
+`igc1` as placeholder NICs. The report states explicitly that the built-in base was used,
+that those NIC names are placeholders to confirm, and that the root password is still
+OPNsense's default `opnsense`.
 
-One thing that stays consistent either way: pfSense's interface keys (`wan`, `lan`,
-`optN`) are kept as-is, and only the underlying *devices* get remapped (`mlxen1` →
-`igc1`, `mlxen1.10` → `vlan03`, `tun_wg0` → `wg0`). OPNsense uses the same key scheme, so
-re-keying would mean rewriting every rule, NAT entry, DHCP range, gateway and DNS
-override that references them, for no real benefit.
+Either way, pfSense's interface keys (`wan`, `lan`, `optN`) are preserved and only the
+underlying *devices* are remapped (`mlxen1` → `igc1`, `mlxen1.10` → `vlan03`, `tun_wg0` →
+`wg0`). OPNsense uses the same key scheme, so re-keying would mean rewriting every rule,
+NAT entry, DHCP range, gateway and DNS override that refers to them, with no benefit.
 
 ## Security
 
-The pfSense config holds password hashes, private keys and pre-shared keys, so a few
-things are deliberate:
+The pfSense config contains password hashes, private keys and pre-shared keys, so several
+choices are deliberate:
 
-- The input is opened read-only. It is never written to. Nor is the base, if you pass one.
-- Secrets are kept out of anything you see or that gets logged. The TUI's source and
-  preview panes, the Markdown report, and log records never contain the value of a
-  password/hash/private-key/PSK/community-string/cert field — those are referred to by
-  name only. A redacting filter is installed before any file is parsed.
-- The output config obviously does contain secrets, so it's written atomically with mode
-  `0600`.
-- The report is deliberately *not* `0600` — it's plain mode (`0644` by default) so you or
-  a diff tool can read it without the config's permissions. It contains no XML and no
-  secret values, just labels, counts and notes.
+- The input is opened read-only and is never written to. The same applies to the base, if
+  one is supplied.
+- Secrets are kept out of anything displayed or logged. The TUI source and preview panes,
+  the Markdown report, and log records never contain the value of a password, hash, private
+  key, PSK, community string or certificate field; such fields are referred to by name
+  only. A redacting filter is installed before any file is parsed.
+- The output config does contain secrets, so it is written atomically with mode `0600`.
+- The report is written with the normal file mode (`0644` by default), not `0600`, so that
+  it can be read without the config's permissions. It contains no XML and no secret values —
+  only labels, counts and notes.
 
-## Please test the output before you trust it
+## Test the output before relying on it
 
-Validation here is structural and referential: it checks the XML is well-formed, the
-UUIDs are unique, the interfaces/VLANs/WireGuard links resolve, and that rules, NAT, DHCP,
-aliases and DNS references all point at things that exist. It does **not** re-implement
-OPNsense's own PHP model validation, so "pf2opn says it's fine" is not the same as
-"OPNsense will accept it".
+Validation is structural and referential: it checks that the XML is well-formed, UUIDs are
+unique, the interface, VLAN and WireGuard links resolve, and that rules, NAT, DHCP, aliases
+and DNS references point at things that exist. It does not re-implement OPNsense's own PHP
+model validation, so a clean pf2opn run does not guarantee OPNsense will accept the config.
 
-So before this goes anywhere near the real gateway: import the output into a throwaway
-OPNsense 26.7 VM, restore the whole config (**System ▸ Configuration ▸ Backups ▸
-Restore**), reboot, and make sure the Firewall, NAT, Dnsmasq DHCP, Unbound and WireGuard
-pages all load without complaints. Check the interface assignments on the console too,
-before you plug in WAN. I found two real bugs this way that the tests never would have.
+Before applying the output to the real gateway, import it into a throwaway OPNsense 26.7
+VM: restore the whole config (**System ▸ Configuration ▸ Backups ▸ Restore**), reboot, and
+confirm the Firewall, NAT, Dnsmasq DHCP, Unbound and WireGuard pages load without
+validation errors. Check the interface assignments on the console as well, before
+connecting WAN. This step has caught two real defects that the automated tests did not.
 
 ## Working on it
 
@@ -218,10 +213,10 @@ before you plug in WAN. I found two real bugs this way that the tests never woul
 ```
 
 The per-translator tests are golden files under `tests/golden/`; `pytest --update-golden`
-rewrites them, so always read that diff. Fixtures are all synthetic — **don't commit a
-real config** (`config-*.xml`, `*.real.xml`, `*.report.md` and `/local/` are gitignored
-for that reason).
+rewrites them, so review that diff. All fixtures are synthetic — do not commit a real
+config (`config-*.xml`, `*.real.xml`, `*.report.md` and `/local/` are gitignored for this
+reason).
 
-The one config that is committed is `src/pf2opn/data/base_default.xml`. That's not anyone's
-export — it's OPNsense's own public factory default, with the wizard prompt stripped and
-the placeholder NICs tidied up, shipped so the tool has a base to fall back on.
+The one committed config is `src/pf2opn/data/base_default.xml`: the tool's built-in base. It
+is not a private export but OPNsense's own public factory default, with the wizard prompt
+removed and the placeholder NICs tidied up, shipped as package data.
