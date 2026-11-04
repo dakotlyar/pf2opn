@@ -7,7 +7,13 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-PYTHON="${PYTHON:-python}"
+
+# Prefer the project venv (where the build extra is installed); fall back to python3.
+if [ -z "${PYTHON:-}" ] && [ -x .venv/bin/python ]; then
+  PYTHON=.venv/bin/python
+else
+  PYTHON="${PYTHON:-python3}"
+fi
 
 "$PYTHON" -m PyInstaller --clean --noconfirm pf2opn.spec
 echo "Built: $(pwd)/dist/pf2opn"
