@@ -5,6 +5,8 @@ __pycache__/
 # PyInstaller build output (pf2opn.spec is committed on purpose).
 /build/
 /dist/
+# stray uv lockfile (the project builds with setuptools, not uv)
+uv.lock
 /local/
 /out/
 config-*.xml
