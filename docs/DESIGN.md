@@ -1638,7 +1638,7 @@ not an `ArrayField`.
 | `enable` | `enabled` | `opn_bool(pf_flag(enable))` — `yes`/`on`/presence → `1`, `no`/`off`/absent → `0`. `default_selected = pf_flag(enable)`. |
 | `interfaces` (comma list of pfSense interface keys) | `interfaces` | split on `,`, strip, drop empties; keep each key that `ctx.map_iface(k)` returns (included **and** migrated), in source order; join with `,`. A key that is not a pfSense interface at all, or is excluded/unsupported on the interface map, is **dropped with a PARTIAL warning** naming it. **The unmapped-interface behaviour is "drop with a warning", not UNSUPPORTED** — the rest of the reflector config still migrates. Counts: `enabled=1` and 0 keys kept → UNSUPPORTED ("no migrated interfaces to reflect"); exactly 1 kept → PARTIAL (the daemon needs ≥2); >5 kept → PARTIAL (daemon max 5). An empty source list with `enabled=1` → UNSUPPORTED ("pfSense reflects on all interfaces; os-mdns-repeater needs an explicit list — set Listen Interfaces manually"). |
 | `carpstatusvid` | `enablecarp` | `none`/empty → `0`; any other value → `1`, **PARTIAL** warning "pfSense gated the service on one CARP VIP; OPNsense's `enablecarp` gates on any CARP master". (`enablecarp` is the one genuine target analogue of the no-equivalent fields.) |
-| `action` | – | no equivalent. `allow`/empty → ignored (the list is an allow-list, which is what OPNsense's positive "Listen Interfaces" already is). `deny` → **UNSUPPORTED**: OPNsense has no deny-list, and pf2opn will **not** silently invert the list; reason tells the user to set Listen Interfaces manually. |
+| `action` | – | no equivalent. `allow`/empty → ignored (the list is an allow-list, which is what OPNsense's positive "Listen Interfaces" already is). `deny` → **UNSUPPORTED**, but **only when `enabled=1`**: OPNsense has no deny-list, and pf2opn will **not** silently invert the list; reason tells the user to set Listen Interfaces manually. When the config is disabled (`enabled=0`) this field is never consulted — the item short-circuits to OK (see **Status** below). |
 | `disable_ipv4`, `disable_ipv6` | – | no equivalent (the model has no family toggle; the daemon reflects IPv4). Ignored; **PARTIAL** warning only when the value is truthy by text (`on`/`yes`/`1`/`true`). An empty element — as in the reference config — is treated as off and produces no warning. |
 | `reflection` | – | no separate field: reflection is the plugin's only function. `yes`/truthy → ignored; absent/`no` → PARTIAL warning "os-mdns-repeater always reflects; reflection cannot be off while the service is enabled". |
 | `override_hostname`, `override_domain` | – | no equivalent. Ignored; PARTIAL warning if non-empty. |
@@ -1646,9 +1646,12 @@ not an `ArrayField`.
 | `filtering` | – | no equivalent. Ignored; PARTIAL warning if non-empty/truthy. |
 | – | `blocklist` | **not written.** pfSense has no network-blocklist source; an existing value in the base is left untouched. |
 
-**Status.** `enabled=0` → the item is still discovered, but `default_selected=False`, status OK (nothing
-else to warn about) and it renders `enabled=0` if selected. Otherwise status is OK unless one of the
-PARTIAL warnings above fires (any single warning makes the whole item PARTIAL, as usual).
+**Status.** `enabled=0` **short-circuits to OK regardless of the other fields**: the item is still
+discovered, with `default_selected=False` and no warnings, and it renders `enabled=0` if selected. The
+`action=deny` → UNSUPPORTED case and every PARTIAL warning above apply **only when `enabled=1`**. When
+enabled, the status is UNSUPPORTED for `action=deny`, for an empty source interface list, or when 0 keys
+survive filtering; otherwise it is OK unless one of the PARTIAL warnings above fires (any single warning
+makes the whole item PARTIAL, as usual).
 
 **Render** (all `SET` placements under `opn:OPNsense/MDNSRepeater`): `enabled`, `enablecarp`, and
 `interfaces`. No `finalize` step. Add `"OPNsense/MDNSRepeater": "1.0.1"` to `MODEL_VERSIONS` (§10.3) so
@@ -1804,11 +1807,16 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    OPNsense a lone `nat … inet from ::1/128` makes `pfctl` reject the whole `/tmp/rules.debug`
    ("rule expands to no valid combination" → 0 rules loaded).
 14. **mDNS reflector** (§12.1.20): every comma-separated token in `OPNsense/MDNSRepeater/interfaces`
-    is an output interface key (the same vocabulary as check 5) — an unknown key is an **error** (the
-    `InterfaceField` has no "any" keyword); when `OPNsense/MDNSRepeater/enabled` is `1` the `interfaces`
-    element is present and non-empty (the field is `Required`). Emit a **warning** (not an error) when
-    `enabled=1` and fewer than 2 keys are listed — the plugin asks for at least 2, but the model does
-    not enforce it.
+    must be an output interface key — **not** the firewall pseudo-interfaces that check 5's vocabulary
+    also admits: `wireguard`/`openvpn`/`enc0` are not `InterfaceField` options, which are built only
+    from the configured `interfaces/*` keys, so an unknown key is an **error** (the `InterfaceField`
+    also has no "any" keyword). When `OPNsense/MDNSRepeater/enabled` is `1` the `interfaces` element is
+    present and non-empty (the field is `Required`). Emit a **warning** (not an error) when `enabled=1`
+    and the list is outside 2–5 keys — **fewer than 2** *or* **more than 5** — the plugin asks for at
+    least 2 and supports at most 5, but the model enforces neither.
+    (Implementation note for the follow-up diff: `validate._check_mdns_repeater` still accepts
+    `_VPN_IFACE_TOKENS` (`wireguard`/`openvpn`/`enc0`) for this field and must drop that allowance — it
+    belongs to check 5's firewall-rule vocabulary only, per the `InterfaceField` option source above.)
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
 sanitizing; `nat/outbound/mode` automatic with snat rules present; pfSense `hybrid` outbound NAT
@@ -2268,9 +2276,9 @@ Add `avahi.py` (translator section `avahi`, one item `avahi:config`): map
 Accept: goldens for the reference shape — `enabled=1`, `enablecarp=0`, `interfaces` = the mapped keys
 comma-joined; a source interface that is excluded/unmapped is dropped with a PARTIAL warning (0 kept →
 UNSUPPORTED, 1 kept → PARTIAL, >5 → PARTIAL); the no-equivalent fields behave exactly as §12.1.20 says
-(`action=deny` → UNSUPPORTED; a truthy `disable_ipv4`/`override_hostname`/`publishing`/`filtering` →
+(`action=deny` **with `enabled=1`** → UNSUPPORTED; a truthy `disable_ipv4`/`override_hostname`/`publishing`/`filtering` →
 PARTIAL; `carpstatusvid` ≠ `none` → `enablecarp=1` + PARTIAL warning); a present-but-disabled config
-yields `enabled=0` with `default_selected=False`; `inspect` no longer reports `unsup:avahi`; and §13
+yields `enabled=0` with `default_selected=False` (OK, and the deny-list is dropped without error); `inspect` no longer reports `unsup:avahi`; and §13
 check 14 passes on the emitted output.
 
 **M16 — Built-in base, Load-screen search, section-label fix** (§3 D2, §5.1, §7.4, §9, §10, §13–§16)
@@ -2631,7 +2639,7 @@ against `opnsense/plugins` branch **`stable/26.7`**, not from the stub's guess:
   `blocklist.split(',')`, each interface key mapped with `physical_interface()`.
 * `.../controllers/OPNsense/MDNSRepeater/forms/general.xml` — "Listen Interfaces"; the help states the
   daemon needs at least 2 and supports at most 5 interfaces (**the model does not enforce it**, so §13
-  check 14 warns rather than errors on fewer than 2).
+  check 14 warns rather than errors when the list is outside 2–5, i.e. fewer than 2 or more than 5).
 * `.../MDNSRepeater.php` (empty `BaseModel`) and `.../etc/inc/plugins.inc.d/mdnsrepeater.inc` (service
   registered only when `enabled=1`).
 
@@ -2640,7 +2648,9 @@ pfSense side: the open item is resolved — the real `installedpackages/avahi/co
 `override_domain`, `publishing`, `filtering`. Decisions in §12.1.20: one item `avahi:config` for the whole
 section; `enable`→`enabled`, `interfaces`→`interfaces` (comma list of pf keys; an excluded/unmapped key is
 **dropped with a warning**, not UNSUPPORTED); `carpstatusvid` ≠ `none` → `enablecarp=1` + PARTIAL;
-`action=deny` → UNSUPPORTED (no deny-list on OPNsense, and pf2opn will not silently invert it);
+`action=deny` → UNSUPPORTED **only when the config is enabled** (no deny-list on OPNsense, and pf2opn will
+not silently invert it); a disabled config (`enabled=0`) short-circuits to OK with `default_selected=False`,
+the deny list dropped without error;
 `disable_ipv4`/`disable_ipv6`/`override_hostname`/`override_domain`/`publishing`/`filtering` are ignored
 with a PARTIAL warning only when truthy/non-empty; `reflection` is the plugin's core function (warn only
 when it is off). The `unsup:avahi` catalogue row (§12.4) and the `unsupported.py` `("avahi", …)` entry are
