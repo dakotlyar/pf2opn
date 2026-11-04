@@ -72,6 +72,7 @@ Sources I read (all under `https://github.com/opnsense/core/blob/26.7.8/`):
 | `Syslog/Syslog.xml` | `//OPNsense/Syslog` | 1.0.2 |
 | `Core/Tunables.xml` | `//sysctl` | 1.0.2 |
 | plugins `dns/ddclient/…/DynDNS/DynDNS.xml` (branch `stable/26.7`) | `//OPNsense/DynDNS` | 1.5.1 |
+| plugins `net/mdns-repeater/…/MDNSRepeater/MDNSRepeater.xml` (branch `stable/26.7`) | `//OPNsense/MDNSRepeater` | 1.0.1 |
 
 > DHCPv4 is written to **Dnsmasq** (`Dnsmasq/Dnsmasq.xml`, mount `/dnsmasq`). The Kea row is kept only
 > because Kea is the one plausible *future* backend (§12.3); it is not used (see §18 Q1 / D5).
@@ -527,6 +528,7 @@ class Plan:
 | wg_peer | `wgpeer:<index>` | `wgpeer:3` |
 | dyndns | `ddns:<index>` | |
 | syslog | `syslog:remote<N>` | |
+| avahi | `avahi:config` | (one item for the whole section, §12.1.20) |
 | cron | `cron#<index>` | |
 | unsupported | `unsup:<section or package>` | `unsup:pfblockerng`, `unsup:captiveportal` |
 
@@ -781,6 +783,7 @@ MODEL_VERSIONS = {   # path relative to <opnsense> -> version attr (26.7.8)
   "OPNsense/wireguard/general": "0.0.1",
   "OPNsense/Syslog": "1.0.2",
   "OPNsense/DynDNS": "1.5.1",
+  "OPNsense/MDNSRepeater": "1.0.1",
   "vlans": "1.0.0",
   "virtualip": "1.0.1",
   "staticroutes": "1.0.1",
@@ -864,6 +867,7 @@ element), with a `uuid` attribute unless stated otherwise.
 | dyndnses | 1 | dyndns (130) | `OPNsense/DynDNS/*` (plugin os-ddclient) | §12.1.18 |
 | syslog | 1 | syslog (140) | `OPNsense/Syslog/destinations/destination[]` | §12.1.19 |
 | cron | 1 (classifier) | cron (150) | – (never written) | §12.1.16 |
+| installedpackages/avahi | 1 | avahi (160) | `OPNsense/MDNSRepeater` (plugin os-mdns-repeater) | §12.1.20 |
 | dhcpdv6, RA | 2 | – | Dnsmasq DHCPv6 / radvd | |
 | sysctl | 2 | – | `sysctl/item[]` | |
 | ifgroups | 2 | – | `ifgroups/ifgroupentry[]` | |
@@ -1603,6 +1607,60 @@ is written unbracketed into the config. pfSense-only toggles (`filterdescription
 settings differ; review System ▸ Settings ▸ Logging". For the real config this is the only
 syslog item.
 
+#### 12.1.20 mDNS reflector / Avahi (`avahi.py`)
+Source: `pf:installedpackages/avahi/config` (a single `<config>` block — the whole section is one
+settings object, not a list). Target: plugin **`os-mdns-repeater`**, model
+`net/mdns-repeater/src/opnsense/mvc/app/models/OPNsense/MDNSRepeater/MDNSRepeater.xml`, mount
+`//OPNsense/MDNSRepeater`, **version `1.0.1`** (verified against `opnsense/plugins` branch `stable/26.7`
+— see §19; the model file's `<mount>`/`<version>` are the source of truth). `requires_plugin =
+"os-mdns-repeater"`, translator section `avahi`, title "mDNS reflector (Avahi)", tier 1, order 160,
+`base_policy` `none`, `container` `None`.
+
+**The model's fields (verbatim, with types/constraints).** `enabled` (`BooleanField`, `Required`),
+`enablecarp` (`BooleanField`, `Required`), `interfaces` (`InterfaceField`, `Required`, **`Multiple=Y`** —
+one comma-separated element of logical interface keys, default `lan`), `blocklist` (`NetworkField`,
+**`AsList=Y`**, `FieldSeparator=,`, `AddressFamily=ipv4`, `NetMaskRequired=Y`, `WildcardEnabled=N`).
+The plugin's RC template
+(`.../service/templates/OPNsense/MDNSRepeater/mdnsrepeater`) splits `interfaces` and `blocklist` on
+`,` and maps each interface key through `physical_interface()`; the GUI form
+(`.../controllers/OPNsense/MDNSRepeater/forms/general.xml`) labels `interfaces` "Listen Interfaces"
+and states the daemon needs **at least 2** and supports **at most 5** interfaces. There is no allow/deny
+toggle, no protocol-family toggle, and no host/domain override — the daemon only reflects mDNS between
+the listed interfaces, optionally excluding `blocklist` IPv4 networks.
+
+**One item for the whole section.** `avahi:config` (`section = "avahi"`). Discovered when
+`pf:installedpackages/avahi/config` exists and is non-empty (§12.4's "non-empty" rule). The target is a
+single settings mount, so there is nothing to key per interface: `interfaces` is one `InterfaceField`,
+not an `ArrayField`.
+
+| pfSense (`avahi/config/…`) | OPNsense (`MDNSRepeater/…`) | transform |
+|---|---|---|
+| `enable` | `enabled` | `opn_bool(pf_flag(enable))` — `yes`/`on`/presence → `1`, `no`/`off`/absent → `0`. `default_selected = pf_flag(enable)`. |
+| `interfaces` (comma list of pfSense interface keys) | `interfaces` | split on `,`, strip, drop empties; keep each key that `ctx.map_iface(k)` returns (included **and** migrated), in source order; join with `,`. A key that is not a pfSense interface at all, or is excluded/unsupported on the interface map, is **dropped with a PARTIAL warning** naming it. **The unmapped-interface behaviour is "drop with a warning", not UNSUPPORTED** — the rest of the reflector config still migrates. Counts: `enabled=1` and 0 keys kept → UNSUPPORTED ("no migrated interfaces to reflect"); exactly 1 kept → PARTIAL (the daemon needs ≥2); >5 kept → PARTIAL (daemon max 5). An empty source list with `enabled=1` → UNSUPPORTED ("pfSense reflects on all interfaces; os-mdns-repeater needs an explicit list — set Listen Interfaces manually"). |
+| `carpstatusvid` | `enablecarp` | `none`/empty → `0`; any other value → `1`, **PARTIAL** warning "pfSense gated the service on one CARP VIP; OPNsense's `enablecarp` gates on any CARP master". (`enablecarp` is the one genuine target analogue of the no-equivalent fields.) |
+| `action` | – | no equivalent. `allow`/empty → ignored (the list is an allow-list, which is what OPNsense's positive "Listen Interfaces" already is). `deny` → **UNSUPPORTED**: OPNsense has no deny-list, and pf2opn will **not** silently invert the list; reason tells the user to set Listen Interfaces manually. |
+| `disable_ipv4`, `disable_ipv6` | – | no equivalent (the model has no family toggle; the daemon reflects IPv4). Ignored; **PARTIAL** warning only when the value is truthy by text (`on`/`yes`/`1`/`true`). An empty element — as in the reference config — is treated as off and produces no warning. |
+| `reflection` | – | no separate field: reflection is the plugin's only function. `yes`/truthy → ignored; absent/`no` → PARTIAL warning "os-mdns-repeater always reflects; reflection cannot be off while the service is enabled". |
+| `override_hostname`, `override_domain` | – | no equivalent. Ignored; PARTIAL warning if non-empty. |
+| `publishing` | – | no equivalent. Ignored; PARTIAL warning if non-empty/truthy. |
+| `filtering` | – | no equivalent. Ignored; PARTIAL warning if non-empty/truthy. |
+| – | `blocklist` | **not written.** pfSense has no network-blocklist source; an existing value in the base is left untouched. |
+
+**Status.** `enabled=0` → the item is still discovered, but `default_selected=False`, status OK (nothing
+else to warn about) and it renders `enabled=0` if selected. Otherwise status is OK unless one of the
+PARTIAL warnings above fires (any single warning makes the whole item PARTIAL, as usual).
+
+**Render** (all `SET` placements under `opn:OPNsense/MDNSRepeater`): `enabled`, `enablecarp`, and
+`interfaces`. No `finalize` step. Add `"OPNsense/MDNSRepeater": "1.0.1"` to `MODEL_VERSIONS` (§10.3) so
+the created element carries the model version and import cannot re-run model migrations.
+
+Files read to verify this section (all `opnsense/plugins`, branch `stable/26.7`):
+`net/mdns-repeater/src/opnsense/mvc/app/models/OPNsense/MDNSRepeater/MDNSRepeater.xml` (mount, version,
+fields), `.../MDNSRepeater.php` (empty `BaseModel`), `.../service/templates/OPNsense/MDNSRepeater/mdnsrepeater`
+(the `,` split and `physical_interface()`), `.../controllers/OPNsense/MDNSRepeater/forms/general.xml`
+("Listen Interfaces", the ≥2/≤5 note), and `.../etc/inc/plugins.inc.d/mdnsrepeater.inc` (the service is
+registered only when `enabled=1`).
+
 ### 12.2 Interface mapping rules (`ifmap.py`)
 ```python
 def classify(device: str, pf: etree._Element) -> str
@@ -1631,7 +1689,8 @@ DHCPv6 and router advertisements (Dnsmasq DHCPv6 + `OPNsense/Radvd`). DHCP custo
 (`os-udpbroadcastrelay`) — both **stay Tier 2 for now** (Q6). Filter separators → categories. OpenVPN
 instances. IPsec tunnels (Swanctl). LAGG/bridge/PPPoE/GIF/GRE devices. Static ARP.
 
-mDNS/Avahi (`os-mdns-repeater`) has moved out of Tier 2: it is spec'd as **M15** (§17). Kea remains the
+mDNS/Avahi is **no longer Tier 2**: it is migrated as a Tier 1 translator (`os-mdns-repeater`, §12.1.20,
+M15). UPnP (`os-upnp`) and the UDP broadcast relay (`os-udpbroadcastrelay`) still stay Tier 2. Kea remains the
 only plausible *alternative* DHCP backend — it is the right tool only for HA lease-sync or thousands of
 leases — but it is **not** used here (D5). If it is ever added, it slots in as a second backend behind the
 same `dhcp:<ifkey>` items.
@@ -1661,7 +1720,6 @@ item. Detectors must test the *content* of the child, not merely its existence (
 | `unsup:freeradius` | `installedpackages/freeradius*` | "install os-freeradius and reconfigure; client secrets not migrated" |
 | `unsup:frr` | `installedpackages/frr*` | "install os-frr 2.x and rebuild BGP config" |
 | `unsup:tailscale` | `installedpackages/tailscale*` | "install os-tailscale and re-authenticate" |
-| `unsup:avahi` | `installedpackages/avahi` | "install os-mdns-repeater; migrated as M15 (§17)" |
 | `unsup:shellcmd` | `installedpackages/shellcmdsettings` or `system/earlyshellcmd`/`shellcmd` | "use /usr/local/etc/rc.syshook.d/ scripts" |
 | `unsup:servicewatchdog` | `installedpackages/servicewatchdog` | "use Monit" |
 | `unsup:openvpn_export` | `installedpackages/vpn_openvpn_export` | "built into OPNsense OpenVPN" |
@@ -1676,6 +1734,8 @@ item. Detectors must test the *content* of the child, not merely its existence (
 | `unsup:sshdata` | `sshdata` | "SSH host keys not migrated; OPNsense generates new ones" |
 
 `installedpackages/package`, `menu`, `service` are ignored (they are package bookkeeping, not policy).
+`installedpackages/avahi` is **not** in this catalogue — it is migrated by §12.1.20 (M15), so there is no
+`unsup:avahi` item; M15 removes the `("avahi", …)` entry from `_CATALOGUE` in `unsupported.py`.
 
 **Non-empty but ignored** (listed once in the report under "not applicable", not as unsupported items):
 `ovpnserver` (5 children in the real config — OpenVPN-wizard leftovers; the actual `openvpn` section is empty,
@@ -1743,6 +1803,12 @@ Errors block writing (exit 1 / TUI review shows them, Write disabled):
    This mirrors `Firewall/Filter.php::performValidation()`; a mismatch is a **model error**, and on
    OPNsense a lone `nat … inet from ::1/128` makes `pfctl` reject the whole `/tmp/rules.debug`
    ("rule expands to no valid combination" → 0 rules loaded).
+14. **mDNS reflector** (§12.1.20): every comma-separated token in `OPNsense/MDNSRepeater/interfaces`
+    is an output interface key (the same vocabulary as check 5) — an unknown key is an **error** (the
+    `InterfaceField` has no "any" keyword); when `OPNsense/MDNSRepeater/enabled` is `1` the `interfaces`
+    element is present and non-empty (the field is `Required`). Emit a **warning** (not an error) when
+    `enabled=1` and fewer than 2 keys are listed — the plugin asks for at least 2, but the model does
+    not enforce it.
 
 Warnings (shown, not blocking): a base model version mismatch (§10.3); descriptions changed by
 sanitizing; `nat/outbound/mode` automatic with snat rules present; pfSense `hybrid` outbound NAT
@@ -2193,14 +2259,19 @@ All validation checks, the secret-leak test, and README usage. Dave runs it agai
 imports the result into a throwaway OPNsense 26.7 VM on **cf99p03** (the import-test host, Q3). Fix
 whatever the import reveals (file follow-up issues).
 
-**M15 — mDNS reflector / Avahi (stub)** (§12.3; `unsup:avahi` in §12.4)
-Needed soon (Q6). pfSense `installedpackages/avahi` → OPNsense `os-mdns-repeater` (plugin model
-`//OPNsense/MDNSRepeater`, **v1.0.1**). Mapping sketch: `enabled` ← avahi enable; `interfaces` ← the
-pfSense reflect-interface list, mapped keys, comma-joined (`InterfaceField Multiple`); `enablecarp` = `0`;
-`blocklist` empty. **Open item:** the exact pfSense `avahi` field names are not yet verified against the
-package — confirm them before building (the OPNsense target fields *are* verified against the plugin
-model). UPnP (`os-upnp`) and the UDP broadcast relay (`os-udpbroadcastrelay`) **stay Tier 2 for now**, not
-folded into M15.
+**M15 — mDNS reflector / Avahi** (§12.1.20, §13 item 14; removes `unsup:avahi` from §12.4)
+Add `avahi.py` (translator section `avahi`, one item `avahi:config`): map
+`pf:installedpackages/avahi/config` → `opn:OPNsense/MDNSRepeater` (plugin **os-mdns-repeater**, model
+`//OPNsense/MDNSRepeater` **v1.0.1**) and add `OPNsense/MDNSRepeater` to `MODEL_VERSIONS` (§10.3).
+**Delete the `("avahi", …)` tuple from `_CATALOGUE` in `unsupported.py`** so the section stops emitting
+`unsup:avahi`. UPnP and the UDP broadcast relay stay Tier 2; not part of this milestone.
+Accept: goldens for the reference shape — `enabled=1`, `enablecarp=0`, `interfaces` = the mapped keys
+comma-joined; a source interface that is excluded/unmapped is dropped with a PARTIAL warning (0 kept →
+UNSUPPORTED, 1 kept → PARTIAL, >5 → PARTIAL); the no-equivalent fields behave exactly as §12.1.20 says
+(`action=deny` → UNSUPPORTED; a truthy `disable_ipv4`/`override_hostname`/`publishing`/`filtering` →
+PARTIAL; `carpstatusvid` ≠ `none` → `enablecarp=1` + PARTIAL warning); a present-but-disabled config
+yields `enabled=0` with `default_selected=False`; `inspect` no longer reports `unsup:avahi`; and §13
+check 14 passes on the emitted output.
 
 **M16 — Built-in base, Load-screen search, section-label fix** (§3 D2, §5.1, §7.4, §9, §10, §13–§16)
 The three changes in the §19 amendment, as one self-contained milestone:
@@ -2270,10 +2341,12 @@ restated here.
   **→ Confirmed — empty `interface` by default, keep the expand-to-all fallback.** Consequence: §12.1.7
   (filter `interface` row) stands; M5 keeps testing both paths.
 
-Open items carried forward from these answers: **Q3** — the `cf99p03` VM provisioning path (web UI);
-**Q6/M15** — verify the pfSense `avahi` field names against the package. (The static-only-subnet
-`start_addr` question was resolved on 2026-11-03 — `RangeAddressField` accepts a bare network address;
-see the note at the end of §12.1.11 and the AP-5 entry in §19.)
+Open items carried forward from these answers: **Q3** — the `cf99p03` VM provisioning path (web UI).
+(The **Q6/M15** open item — "verify the pfSense `avahi` field names against the package" — is
+**resolved**: the real config's `installedpackages/avahi/config` fields are known, and the OPNsense
+target was re-verified against `os-mdns-repeater` `stable/26.7` — see §12.1.20 and the §19 M15 entry.
+The static-only-subnet `start_addr` question was resolved on 2026-11-03 — `RangeAddressField` accepts a
+bare network address; see the note at the end of §12.1.11 and the AP-5 entry in §19.)
 
 ---
 
@@ -2543,4 +2616,33 @@ and `inspect` should really relax `--base` too, or keep it required while only `
 default — the design chooses "relax all three" for consistency, but that is a deliberate change to
 the non-interactive contract (a script that previously exited 2 for a missing `--base` now
 succeeds with a default-base output).
+
+### 2026-11-03 — M15 spec pass: Avahi → os-mdns-repeater (OPNsense model re-verified)
+
+Replaced the M15 stub with the real spec (§12.1.20, §17 M15). The OPNsense target was re-verified
+against `opnsense/plugins` branch **`stable/26.7`**, not from the stub's guess:
+
+* `net/mdns-repeater/src/opnsense/mvc/app/models/OPNsense/MDNSRepeater/MDNSRepeater.xml` — mount
+  `//OPNsense/MDNSRepeater`, `version` **`1.0.1`** (the stub's guess was right), fields `enabled`
+  (`BooleanField`, Required), `enablecarp` (`BooleanField`, Required), `interfaces` (`InterfaceField`,
+  Required, `Multiple=Y`), `blocklist` (`NetworkField`, `AsList=Y`, `FieldSeparator=,`, ipv4,
+  `NetMaskRequired=Y`, `WildcardEnabled=N`).
+* `.../service/templates/OPNsense/MDNSRepeater/mdnsrepeater` — `interfaces.split(',')` and
+  `blocklist.split(',')`, each interface key mapped with `physical_interface()`.
+* `.../controllers/OPNsense/MDNSRepeater/forms/general.xml` — "Listen Interfaces"; the help states the
+  daemon needs at least 2 and supports at most 5 interfaces (**the model does not enforce it**, so §13
+  check 14 warns rather than errors on fewer than 2).
+* `.../MDNSRepeater.php` (empty `BaseModel`) and `.../etc/inc/plugins.inc.d/mdnsrepeater.inc` (service
+  registered only when `enabled=1`).
+
+pfSense side: the open item is resolved — the real `installedpackages/avahi/config` uses `enable`,
+`carpstatusvid`, `action`, `interfaces`, `disable_ipv4`, `disable_ipv6`, `reflection`, `override_hostname`,
+`override_domain`, `publishing`, `filtering`. Decisions in §12.1.20: one item `avahi:config` for the whole
+section; `enable`→`enabled`, `interfaces`→`interfaces` (comma list of pf keys; an excluded/unmapped key is
+**dropped with a warning**, not UNSUPPORTED); `carpstatusvid` ≠ `none` → `enablecarp=1` + PARTIAL;
+`action=deny` → UNSUPPORTED (no deny-list on OPNsense, and pf2opn will not silently invert it);
+`disable_ipv4`/`disable_ipv6`/`override_hostname`/`override_domain`/`publishing`/`filtering` are ignored
+with a PARTIAL warning only when truthy/non-empty; `reflection` is the plugin's core function (warn only
+when it is off). The `unsup:avahi` catalogue row (§12.4) and the `unsupported.py` `("avahi", …)` entry are
+removed by M15; `OPNsense/MDNSRepeater` joins `MODEL_VERSIONS` (§10.3).
 
