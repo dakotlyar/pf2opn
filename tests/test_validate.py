@@ -562,6 +562,21 @@ def test_mdns_unknown_interface_is_an_error(minimal_plan) -> None:
     assert any("opt9" in finding.message for finding in findings)
 
 
+def test_mdns_firewall_pseudo_interfaces_are_errors(minimal_plan) -> None:
+    """§13 check 14: the plain InterfaceField accepts only interface keys.
+
+    Unlike check 5's filter/NAT vocabulary, this field must not admit the
+    firewall pseudo-interfaces ``wireguard``/``openvpn``/``enc0``.
+    """
+    _src, plan = minimal_plan
+    for token in ("wireguard", "openvpn", "enc0"):
+        out = _mdns_out(
+            f"<enabled>1</enabled><interfaces>lan,{token}</interfaces>", _IFACES
+        )
+        findings = _errors(validate(out, plan))
+        assert any(token in finding.message for finding in findings), token
+
+
 def test_mdns_enabled_without_interfaces_is_an_error(minimal_plan) -> None:
     _src, plan = minimal_plan
     out = _mdns_out("<enabled>1</enabled><interfaces></interfaces>", _IFACES)

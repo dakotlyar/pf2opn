@@ -601,10 +601,13 @@ def _check_mdns_repeater(out: etree._Element) -> list[Finding]:
     """§13 check 14: every mDNS reflector listen interface must be an output key.
 
     The plugin's ``interfaces`` field is an ``InterfaceField`` with no "any"
-    keyword, so an unknown token is a **model error**. When ``enabled=1`` the
-    field is ``Required`` (non-empty). The plugin asks for at least 2 and at most
-    5 listen interfaces but the model enforces neither, so a violation is a
-    **warning**.
+    keyword, so an unknown token is a **model error**. Unlike check 5's filter
+    and NAT fields, this plain ``InterfaceField`` is built only from the
+    configured ``interfaces/*`` keys, so the firewall pseudo-interfaces
+    ``wireguard``/``openvpn``/``enc0`` (``_VPN_IFACE_TOKENS``) are not accepted
+    here. When ``enabled=1`` the field is ``Required`` (non-empty). The plugin
+    asks for at least 2 and at most 5 listen interfaces but the model enforces
+    neither, so a violation is a **warning**.
     """
     findings: list[Finding] = []
     block = out.find("OPNsense/MDNSRepeater")
@@ -614,7 +617,7 @@ def _check_mdns_repeater(out: etree._Element) -> list[Finding]:
     raw = (block.findtext("interfaces") or "").strip()
     tokens = [part.strip() for part in raw.split(",") if part.strip()]
     for token in tokens:
-        if token not in iface_keys and token not in _VPN_IFACE_TOKENS:
+        if token not in iface_keys:
             findings.append(
                 Finding(
                     "error",
